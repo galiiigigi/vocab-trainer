@@ -1,9 +1,10 @@
 # Canadian English Vocabulary Trainer
 
-Single-file app: `vocab-trainer.html` (~3440 lines). PWA manifest & icons generated inline (no external files).
+Main app: `vocab-trainer.html` (~3700 lines). PWA manifest & icons generated inline. Hosted on GitHub Pages.
 
 ## Files
 - `vocab-trainer.html` — the entire app (HTML/CSS/JS + inline PWA manifest/icons)
+- `sw.js` — minimal Service Worker (notification click handler, PWA install support)
 - `CLAUDE.md` — this file (context for Claude)
 
 ## Architecture
@@ -15,7 +16,9 @@ Single-file app: `vocab-trainer.html` (~3440 lines). PWA manifest & icons genera
 - SM-2 Spaced Repetition System
 - All words are user-imported (WORDS_RAW is empty)
 - PWA manifest & icons inlined (canvas-generated data URLs, blob manifest)
-- No service worker (no offline cache) — keeps single-file simplicity
+- Service Worker for notification click handling and PWA install
+- Push notifications at 8:00 AM, 12:00 PM, 10:00 PM (requires app to be running)
+- Hosted on GitHub Pages: https://galiiigigi.github.io/vocab-trainer/
 
 ## Key State
 - `state.customWords[]` — all words (no built-in words)
@@ -64,16 +67,25 @@ Single-file app: `vocab-trainer.html` (~3440 lines). PWA manifest & icons genera
 - **forceAddWord** (~2638): Handles replace, combine definitions, keep both
 - **Gemini API** (~2896): callGemini with dual message format support
 - **Voice Chat** (~2988): Recording, sendVoiceChat with Gemini audio
-- **AI Chat** (~3044): SCENARIOS array (16 scenarios), startChat, customPrompt support
-- **AI Explain** (~3335): aiExplainWord for word detail
-- **AI Quiz Feedback** (~3360): aiQuizExplain ("Why was I wrong?")
-- **Init** (~3430): DOMContentLoaded → rebuildWords, applyTheme, goTo('home')
+- **AI Chat** (~3044): SCENARIOS array (16 scenarios), startChat, startFreeChat, customPrompt support
+- **Free Chat** (~3660): startFreeChat() — open-ended chat with bilingual grammar correction, reviews weak words
+- **Add Word from Chat** (~3870): showAddWordFromChatModal, addWordFromChatInput, addSuggestedWord, addAllSuggestedWords
+- **AI Explain** (~3935): aiExplainWord for word detail
+- **AI Quiz Feedback** (~3960): aiQuizExplain ("Why was I wrong?")
+- **Notifications** (~3980): requestNotificationPermission, initNotifications, checkNotificationTime — reminders at 8am/12pm/10pm
+- **Init** (~4010): DOMContentLoaded → rebuildWords, applyTheme, goTo('home'), SW register, initNotifications
 
 ## Bottom Nav
 Home | Quiz | Cards | Words | Settings (Stats accessible via stat boxes on home)
 
 ## Key Patterns
 - `formatMultiDef(def)` — numbered definitions for combined words
+- `getDailyWord()` — picks a random due/weak/random word for the home screen "Word of the Moment"
+- `startFreeChat()` — open-ended AI chat with bilingual grammar correction ([Correction] X/O/Tip format)
+- `showAddWordFromChatModal()` — modal to save a word during AI chat with AI auto-fill
+- `addSuggestedWord(idx)` / `addAllSuggestedWords()` — add AI-suggested words after chat ends
+- `requestNotificationPermission()` — request + enable push notifications
+- `checkNotificationTime()` — checks every 60s if it's time to send a reminder (8:00/12:00/22:00)
 - `deleteWordById(wordId)` — universal delete (all words are custom)
 - `deleteDupWord(groupIdx, which)` — per-word delete in duplicate review
 - `showDuplicateWarning()` + `forceAddWord()` — duplicate check on manual add
