@@ -250,6 +250,17 @@ textarea.form-input{min-height:60px;resize:vertical}
 
 /* Grammar correction in chat */
 .grammar-correction{background:rgba(253,203,110,.08);border-left:3px solid var(--orange);border-radius:0 8px 8px 0;padding:8px 12px;margin-top:8px;font-size:13px;line-height:1.6}
+
+/* Pronunciation practice modal */
+.pron-target{font-size:18px;font-weight:700;text-align:center;padding:16px 12px;background:var(--bg3);border-radius:10px;margin-bottom:12px;line-height:1.5}
+.pron-actions{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.pron-actions .btn{flex:1;min-width:0}
+.pron-attempt{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border-radius:8px;margin-bottom:6px}
+.pron-attempt .attempt-label{font-size:12px;color:var(--text3);min-width:60px}
+.pron-attempt .attempt-play{background:none;border:none;font-size:18px;cursor:pointer;padding:4px}
+.pron-ai-feedback{background:rgba(108,92,231,.08);border:1px solid rgba(108,92,231,.15);border-radius:10px;padding:12px;font-size:13px;color:var(--text2);line-height:1.6;margin-top:8px}
+.retry-btn{background:none;border:none;color:var(--orange);font-size:11px;cursor:pointer;padding:2px 6px;opacity:.6;transition:opacity .15s}
+.retry-btn:active{opacity:1}
 </style>
 </head>
 <body>
@@ -3953,7 +3964,7 @@ function renderChat(el, loading){
     <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Try to use these words:</div>
     <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:2px">${wordsHint}</div>
     <div class="chat-messages" id="chat-messages">
-      ${chatState.messages.map(m=>`<div class="chat-bubble ${m.role==='user'?'chat-user':'chat-ai'}">${m.text.replace(/\n/g,'<br>')}${m.role==='ai'?` <button class="speak-btn" onclick="event.stopPropagation();speak(\`${m.text.replace(/\[Correction\][\s\S]*/,'').trim().replace(/`/g,'').replace(/\\/g,'\\\\')}\`)" style="font-size:14px;vertical-align:baseline">&#128264;</button><button class="chat-add-btn" onclick="event.stopPropagation();showAddWordFromChatModal()" title="Save a word">&#128218;+</button>`:''}${m.recIdx!==undefined?` <button class="speak-btn" onclick="event.stopPropagation();playRecording(${m.recIdx})" style="font-size:14px;vertical-align:baseline" title="Replay your voice">&#127911;</button>`:''}</div>`).join('')}
+      ${chatState.messages.map((m,mi)=>`<div class="chat-bubble ${m.role==='user'?'chat-user':'chat-ai'}">${m.text.replace(/\n/g,'<br>')}${m.role==='ai'?` <button class="speak-btn" onclick="event.stopPropagation();speak(\`${m.text.replace(/\[Correction\][\s\S]*/,'').trim().replace(/`/g,'').replace(/\\/g,'\\\\')}\`)" style="font-size:14px;vertical-align:baseline">&#128264;</button><button class="chat-add-btn" onclick="event.stopPropagation();showAddWordFromChatModal()" title="Save a word">&#128218;+</button>`:''}${m.recIdx!==undefined?` <button class="speak-btn" onclick="event.stopPropagation();playRecording(${m.recIdx})" style="font-size:14px;vertical-align:baseline" title="Replay your voice">&#127911;</button><button class="retry-btn" onclick="event.stopPropagation();showPronPractice(${mi})" title="Practice pronunciation">&#128260;</button>`:''}</div>`).join('')}
       ${loading?'<div class="chat-bubble chat-ai"><div class="ai-loading"><span></span><span></span><span></span></div></div>':''}
     </div>
     ${voiceChatActive ? `
@@ -3973,6 +3984,126 @@ function renderChat(el, loading){
   const msgEl = document.getElementById('chat-messages');
   if(msgEl) setTimeout(()=>msgEl.scrollTop=msgEl.scrollHeight,50);
   if(!loading && !voiceChatActive){ const inp=document.getElementById('chat-input'); if(inp) inp.focus(); }
+}
+
+// ===== PRONUNCIATION PRACTICE =====
+let pronState = null; // {msgIdx, isRecording, recorder, stream, chunks, attempts:[{recIdx}], aiFeedback}
+
+function showPronPractice(msgIdx){
+  const msg = chatState.messages[msgIdx];
+  if(!msg) return;
+  if(!pronState || pronState.msgIdx !== msgIdx){
+    // Initialize with existing retries if any
+    const existingRetries = msg.retryRecIdxs || [];
+    pronState = {msgIdx, isRecording:false, recorder:null, stream:null, chunks:[], attempts:existingRetries.map(r=>({recIdx:r})), aiFeedback:null};
+  }
+  renderPronModal();
+}
+
+function renderPronModal(){
+  const msg = chatState.messages[pronState.msgIdx];
+  const root = document.getElementById('modal-root');
+  const allAttempts = [{recIdx:msg.recIdx, label:'Original'}];
+  pronState.attempts.forEach((a,i) => allAttempts.push({recIdx:a.recIdx, label:'Attempt '+(i+1)}));
+  root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this){pronState=null;closeModal()}">
+    <div class="modal">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>Pronunciation Practice</h3>
+        <button onclick="pronState=null;closeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">&times;</button>
+      </div>
+      <div class="pron-target">${msg.text}</div>
+      <div class="pron-actions">
+        <button class="btn btn-sm btn-ghost" onclick="speak('${msg.text.replace(/'/g,"\\'").replace(/\n/g,' ')}')">&#128264; Standard</button>
+        <button class="btn btn-sm ${pronState.isRecording?'btn-red':'btn-orange'}" id="pron-rec-btn" onclick="pronToggleRecord()">
+          ${pronState.isRecording?'&#9899; Stop':'&#127908; Record'}
+        </button>
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your recordings:</div>
+      ${allAttempts.map((a,i)=>`<div class="pron-attempt">
+        <span class="attempt-label">${a.label}</span>
+        <button class="attempt-play" onclick="playRecording(${a.recIdx})">&#9654;</button>
+        ${i===allAttempts.length-1 && state.settings.apiKey ? '<button class="attempt-play" onclick="aiEvaluatePron('+a.recIdx+')" title="AI evaluate" style="font-size:14px">&#129302;</button>' : ''}
+      </div>`).join('')}
+      <div id="pron-ai-result">${pronState.aiFeedback?'<div class="pron-ai-feedback">'+pronState.aiFeedback.replace(/\n/g,'<br>')+'</div>':''}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px">Tip: Listen to Standard, then record yourself. Compare and repeat!</div>
+    </div>
+  </div>`;
+  root.style.display = 'flex';
+}
+
+async function pronToggleRecord(){
+  if(pronState.isRecording){
+    // Stop recording
+    pronState.isRecording = false;
+    if(pronState.recorder && pronState.recorder.state==='recording'){
+      pronState.recorder.onstop = () => {
+        if(pronState.stream) pronState.stream.getTracks().forEach(t=>t.stop());
+        if(pronState.chunks.length){
+          const blob = new Blob(pronState.chunks, {type:'audio/webm'});
+          const url = URL.createObjectURL(blob);
+          const recIdx = chatRecordings.length;
+          chatRecordings.push(url);
+          pronState.attempts.push({recIdx});
+          // Save retries to the message
+          const msg = chatState.messages[pronState.msgIdx];
+          if(!msg.retryRecIdxs) msg.retryRecIdxs = [];
+          msg.retryRecIdxs.push(recIdx);
+          pronState.aiFeedback = null;
+        }
+        pronState.chunks = [];
+        renderPronModal();
+      };
+      pronState.recorder.stop();
+    }
+  } else {
+    // Start recording
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      pronState.stream = stream;
+      pronState.chunks = [];
+      try{ pronState.recorder = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'}); }
+      catch(e){ pronState.recorder = new MediaRecorder(stream); }
+      pronState.recorder.ondataavailable = e => { if(e.data.size>0) pronState.chunks.push(e.data); };
+      pronState.recorder.start();
+      pronState.isRecording = true;
+      renderPronModal();
+    }catch(e){ toast('Microphone access denied'); }
+  }
+}
+
+async function blobUrlToBase64(url){
+  const resp = await fetch(url);
+  const blob = await resp.blob();
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function aiEvaluatePron(recIdx){
+  const msg = chatState.messages[pronState.msgIdx];
+  const resultEl = document.getElementById('pron-ai-result');
+  if(resultEl) resultEl.innerHTML = '<div class="ai-loading"><span></span><span></span><span></span></div>';
+  const blobUrl = chatRecordings[recIdx];
+  if(!blobUrl){ toast('Recording not found'); return; }
+  const base64 = await blobUrlToBase64(blobUrl);
+  const prompt = `The learner tried to say this sentence in English:
+"${msg.text}"
+
+Listen to their audio recording and evaluate their pronunciation. Provide feedback in this format:
+- Overall rating: (Good / Needs Work / Keep Practicing)
+- Specific words that need improvement and how to fix them
+- Tips for better pronunciation
+
+Give feedback in BOTH English and Chinese (中文). Keep it brief and encouraging (4-6 bullet points max).`;
+  const result = await callGeminiWithAudio(base64, 'audio/webm', prompt, 'You are a friendly English pronunciation coach. Give specific, actionable feedback. Be encouraging.');
+  if(result){
+    pronState.aiFeedback = result;
+    if(resultEl) resultEl.innerHTML = '<div class="pron-ai-feedback">' + result.replace(/\n/g,'<br>') + '</div>';
+  } else {
+    if(resultEl) resultEl.innerHTML = '<div style="color:var(--red);font-size:13px">Could not evaluate. Check API key.</div>';
+  }
 }
 
 // ===== ADD WORD FROM CHAT =====
