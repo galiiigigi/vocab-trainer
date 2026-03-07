@@ -3485,6 +3485,8 @@ async function callGeminiWithAudio(audioBase64, mimeType, textPrompt, systemInst
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
+const chatRecordings = [];
+let pendingChatAudioUrl = null;
 
 let recordResolve = null;
 
@@ -3497,9 +3499,10 @@ function startRecording(){
       mediaRecorder.onstop = () => {
         stream.getTracks().forEach(t=>t.stop());
         const blob = new Blob(audioChunks, {type:'audio/webm'});
+        const blobUrl = URL.createObjectURL(blob);
         const reader = new FileReader();
         reader.onloadend = () => {
-          const result = {base64:reader.result.split(',')[1], mimeType:'audio/webm'};
+          const result = {base64:reader.result.split(',')[1], mimeType:'audio/webm', blobUrl};
           if(recordResolve){ recordResolve(result); recordResolve = null; }
         };
         reader.readAsDataURL(blob);
@@ -3520,6 +3523,13 @@ function stopRecording(){
       isRecording = false;
     } else { resolve(null); }
   });
+}
+
+function playRecording(idx){
+  if(chatRecordings[idx]){
+    const a = new Audio(chatRecordings[idx]);
+    a.play().catch(()=>toast('Could not play recording'));
+  }
 }
 
 // ===== VOICE CONVERSATION MODE =====
@@ -3558,7 +3568,9 @@ REPLY: (your response in character)`;
     if(replyMatch) aiText = replyMatch[1].trim();
     if(!heardMatch && !replyMatch) aiText = fullReply;
 
-    chatState.messages.push({role:'user', text:userText});
+    const recIdx = chatRecordings.length;
+    chatRecordings.push(audio.blobUrl);
+    chatState.messages.push({role:'user', text:userText, recIdx});
     chatState.aiMessages.push({role:'user', text:userText});
     chatState.messages.push({role:'ai', text:aiText});
     chatState.aiMessages.push({role:'assistant', text:aiText});
@@ -3751,7 +3763,13 @@ async function sendChatUser(){
   if(!input) return;
   const text = input.value.trim();
   if(!text) return;
-  chatState.messages.push({role:'user',text});
+  const msg = {role:'user', text};
+  if(pendingChatAudioUrl){
+    msg.recIdx = chatRecordings.length;
+    chatRecordings.push(pendingChatAudioUrl);
+    pendingChatAudioUrl = null;
+  }
+  chatState.messages.push(msg);
   chatState.aiMessages.push({role:'user',text});
   chatState.targetWords.forEach(w=>{
     if(text.toLowerCase().includes(w.word.toLowerCase())) chatState.usedWords.add(w.word);
@@ -3770,15 +3788,39 @@ function chatVoiceInput(){
   recognition.interimResults = false;
   const micBtn = document.getElementById('chat-mic');
   if(micBtn){ micBtn.style.background = 'var(--red)'; micBtn.innerHTML = '&#9899;'; }
+  // Also record audio for playback
+  let recStream = null, recChunks = [], recorder = null;
+  pendingChatAudioUrl = null;
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
+    recStream = stream;
+    try{ recorder = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'}); }
+    catch(e){ recorder = new MediaRecorder(stream); }
+    recorder.ondataavailable = e => { if(e.data.size>0) recChunks.push(e.data); };
+    recorder.start();
+  }).catch(()=>{});
+  function stopRec(){
+    if(recorder && recorder.state==='recording'){
+      recorder.onstop = () => {
+        if(recStream) recStream.getTracks().forEach(t=>t.stop());
+        if(recChunks.length){
+          const blob = new Blob(recChunks, {type:'audio/webm'});
+          pendingChatAudioUrl = URL.createObjectURL(blob);
+        }
+      };
+      recorder.stop();
+    } else if(recStream){ recStream.getTracks().forEach(t=>t.stop()); }
+  }
   recognition.onresult = (event) => {
     const transcript = event.results[0][0].transcript;
     const input = document.getElementById('chat-input');
     if(input){ input.value = transcript; input.focus(); }
     if(micBtn){ micBtn.style.background = 'var(--bg3)'; micBtn.innerHTML = '&#127908;'; }
+    stopRec();
   };
   recognition.onerror = () => {
     toast('Could not hear you. Try again.');
     if(micBtn){ micBtn.style.background = 'var(--bg3)'; micBtn.innerHTML = '&#127908;'; }
+    stopRec(); pendingChatAudioUrl = null;
   };
   recognition.onend = () => {
     if(micBtn && micBtn.style.background !== 'var(--bg3)'){
@@ -3911,7 +3953,7 @@ function renderChat(el, loading){
     <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Try to use these words:</div>
     <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:2px">${wordsHint}</div>
     <div class="chat-messages" id="chat-messages">
-      ${chatState.messages.map(m=>`<div class="chat-bubble ${m.role==='user'?'chat-user':'chat-ai'}">${m.text.replace(/\n/g,'<br>')}${m.role==='ai'?` <button class="speak-btn" onclick="event.stopPropagation();speak(\`${m.text.replace(/\[Correction\][\s\S]*/,'').trim().replace(/`/g,'').replace(/\\/g,'\\\\')}\`)" style="font-size:14px;vertical-align:baseline">&#128264;</button><button class="chat-add-btn" onclick="event.stopPropagation();showAddWordFromChatModal()" title="Save a word">&#128218;+</button>`:''}</div>`).join('')}
+      ${chatState.messages.map(m=>`<div class="chat-bubble ${m.role==='user'?'chat-user':'chat-ai'}">${m.text.replace(/\n/g,'<br>')}${m.role==='ai'?` <button class="speak-btn" onclick="event.stopPropagation();speak(\`${m.text.replace(/\[Correction\][\s\S]*/,'').trim().replace(/`/g,'').replace(/\\/g,'\\\\')}\`)" style="font-size:14px;vertical-align:baseline">&#128264;</button><button class="chat-add-btn" onclick="event.stopPropagation();showAddWordFromChatModal()" title="Save a word">&#128218;+</button>`:''}${m.recIdx!==undefined?` <button class="speak-btn" onclick="event.stopPropagation();playRecording(${m.recIdx})" style="font-size:14px;vertical-align:baseline" title="Replay your voice">&#127911;</button>`:''}</div>`).join('')}
       ${loading?'<div class="chat-bubble chat-ai"><div class="ai-loading"><span></span><span></span><span></span></div></div>':''}
     </div>
     ${voiceChatActive ? `
