@@ -1685,11 +1685,93 @@ function renderHeatmap(){
   return html;
 }
 
+// ===== USAGE GUIDE =====
+function showUsageGuide(){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal" style="max-height:90vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>Usage Guide</h3>
+        <button onclick="closeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">&times;</button>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid var(--accent)">
+        <h3 style="color:var(--accent2)">Getting Started</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          1. <b>Add Gemini API key</b> (bottom of Settings) to enable AI features<br>
+          2. <b>Add words</b> via: Words tab &rarr; Add Words (manual or AI suggest)<br>
+          3. <b>Start learning</b> with Quiz, Flashcards, or Free Chat on the Home screen
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid var(--green)">
+        <h3 style="color:var(--green)">Study Modes</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          <b>Quiz</b> &mdash; Multiple choice with timer, tracks response speed<br>
+          <b>Flashcards</b> &mdash; Flip cards, rate your recall<br>
+          <b>Voice Test</b> &mdash; Say the word, app checks pronunciation<br>
+          <b>Ear Training</b> &mdash; Dictation and listening exercises<br>
+          <b>Free Chat</b> &mdash; Open conversation with AI + grammar correction<br>
+          <b>Scenarios</b> &mdash; Role-play Canadian daily situations
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid var(--blue)">
+        <h3 style="color:var(--blue)">AI Chat Features</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          <b>&#128218;+</b> on AI messages &mdash; Save a word to your library<br>
+          <b>&#127911;</b> on your messages &mdash; Replay your voice recording<br>
+          <b>&#128260;</b> on your messages &mdash; Practice pronunciation (re-record + AI evaluate)<br>
+          <b>After conversation</b> &mdash; AI suggests new words to add
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid var(--orange)">
+        <h3 style="color:var(--orange)">Import Words from Gemini</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          You can use Gemini (web/app) as an English tutor and import new words:<br><br>
+          1. Create a Gemini <b>Gem</b> with this instruction:<br>
+          <div style="background:var(--bg3);padding:8px;border-radius:6px;margin:6px 0;font-size:11px;font-family:monospace;word-break:break-all">When I say "&#23398;&#33521;&#35821;", list useful English words from this conversation as JSON: [{"word":"...","definition":"...","example":"...","category":"...","difficulty":1}]<br>Categories: essentials, food, work, shopping, healthcare, housing, transit, weather, social, canadian, technology, legal, finance, geography, engineering, custom</div>
+          2. Chat normally with Gemini about any topic<br>
+          3. Say <b>"&#23398;&#33521;&#35821;"</b> to get the word list<br>
+          4. Copy the JSON &rarr; Settings &rarr; <b>Import Word Pack</b> &rarr; Paste<br>
+          5. Duplicates are automatically skipped
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid var(--red)">
+        <h3 style="color:var(--red)">Apple / iOS Notes</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          <b>&#10003; Supported:</b> All core features, AI chat, TTS, flashcards, quiz<br>
+          <b>&#10003; Add to Home Screen:</b> Safari &rarr; Share button &rarr; "Add to Home Screen"<br>
+          <b>&#10003; Voice recording:</b> Works on iOS 14.3+<br>
+          <b>&#9888; Speech recognition:</b> Works but can be less reliable than Android<br>
+          <b>&#9888; Notifications:</b> Only works on iOS 16.4+ when app is added to Home Screen<br>
+          <b>Tip:</b> For best experience, use Safari and add to Home Screen
+        </div>
+      </div>
+
+      <div class="card card-sm" style="border-left:3px solid var(--text3)">
+        <h3>Sync Between Devices</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.7">
+          <b>Easiest:</b> Use GitHub Gist sync (set up token in Settings)<br>
+          <b>Alternative:</b> Export/Import .json file or Sync Code<br>
+          <b>Note:</b> API keys are excluded from sync by default for security
+        </div>
+      </div>
+
+      <button class="btn btn-ghost mt" onclick="closeModal()">Got it!</button>
+    </div>
+  </div>`;
+  root.style.display = 'flex';
+}
+
 // ===== SETTINGS =====
 function renderSettings(el){
   const s = state.settings;
   el.innerHTML = `
     <h2>Settings</h2>
+    <button class="btn btn-ghost mb" style="border:1px solid var(--accent);color:var(--accent2)" onclick="showUsageGuide()">&#128214; Usage Guide &amp; Tips</button>
     <div class="card mb">
       <div class="setting-row" style="border:none">
         <span class="setting-label">Theme</span>
@@ -1710,30 +1792,6 @@ function renderSettings(el){
       </div>
       ${state.settings.notifications?.enabled ? '<div style="font-size:12px;color:var(--green);margin-top:4px">&#10003; Reminders at 8:00 AM, 12:00 PM, 10:00 PM</div>' :
         '<div style="font-size:12px;color:var(--text3);margin-top:4px">Get reminded to practice at 8:00 AM, 12:00 PM, and 10:00 PM</div>'}
-    </div>
-    <div class="card mb">
-      <h3>Gemini AI</h3>
-      <div class="setting-row" style="border:none">
-        <span class="setting-label">API Key</span>
-      </div>
-      <input class="search-input" type="password" placeholder="Paste your Gemini API key..." value="${state.settings.apiKey}" oninput="state.settings.apiKey=this.value.trim();saveState()" style="font-size:13px">
-      ${state.settings.apiKey ? '<div style="font-size:11px;color:var(--green);margin-top:4px">&#10003; Key saved</div>' : ''}
-      <div style="display:flex;gap:6px;margin-top:8px">
-        <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="showGeminiSetupGuide()">How to get a key?</button>
-        ${state.settings.apiKey ? '<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="testGeminiKey()">Test Key</button>' : ''}
-      </div>
-    </div>
-    <div class="card mb">
-      <h3>GitHub Gist Cloud Sync</h3>
-      <div class="setting-row" style="border:none">
-        <span class="setting-label">Personal Access Token</span>
-      </div>
-      <input class="search-input" type="password" placeholder="Paste your GitHub token..." value="${state.settings.githubGistToken}" oninput="state.settings.githubGistToken=this.value.trim();saveState()" style="font-size:13px">
-      ${state.settings.githubGistToken ? '<div style="font-size:11px;color:var(--green);margin-top:4px">&#10003; Token saved</div>' : ''}
-      <div style="display:flex;gap:6px;margin-top:8px">
-        <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="showGistSetupGuide()">How to get a token?</button>
-        ${state.settings.githubGistToken ? '<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="testGistToken()">Test Token</button>' : ''}
-      </div>
     </div>
     <div class="card">
       <div class="setting-row">
@@ -1859,7 +1917,7 @@ function renderSettings(el){
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-progress" checked> Progress</label>
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-settings" checked> Settings</label>
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-stats" checked> Stats</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--orange);cursor:pointer"><input type="checkbox" id="sync-apikeys"> API Keys</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--orange);cursor:pointer"><input type="checkbox" id="sync-apikeys" onchange="document.getElementById('gist-export-btn').disabled=this.checked;document.getElementById('gist-apikey-warn').style.display=this.checked?'block':'none'"> API Keys</label>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="generateSyncCode()">Export Sync Code</button>
@@ -1867,10 +1925,35 @@ function renderSettings(el){
         <button class="btn btn-ghost btn-sm" onclick="exportSyncFile()">Export .json File</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sync-file-input').click()">Import .json File</button>
         <input type="file" id="sync-file-input" accept=".json" style="display:none" onchange="importSyncFile(this)">
-        <button class="btn btn-ghost btn-sm" onclick="exportToGist()">Export to GitHub Gist</button>
+        <button class="btn btn-ghost btn-sm" id="gist-export-btn" onclick="exportToGist()">Export to GitHub Gist</button>
         <button class="btn btn-ghost btn-sm" onclick="importFromGist()">Import from GitHub Gist</button>
       </div>
+      <div style="font-size:11px;color:var(--orange);margin-top:6px;display:none" id="gist-apikey-warn">&#9888; Uncheck "API Keys" to export to GitHub Gist (Gist data is not encrypted)</div>
       <div id="sync-code-area"></div>
+    </div>
+    <div class="card mt">
+      <h3>Gemini AI</h3>
+      <div class="setting-row" style="border:none">
+        <span class="setting-label">API Key</span>
+      </div>
+      <input class="search-input" type="password" placeholder="Paste your Gemini API key..." value="${state.settings.apiKey}" oninput="state.settings.apiKey=this.value.trim();saveState()" style="font-size:13px">
+      ${state.settings.apiKey ? '<div style="font-size:11px;color:var(--green);margin-top:4px">&#10003; Key saved</div>' : ''}
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="showGeminiSetupGuide()">How to get a key?</button>
+        ${state.settings.apiKey ? '<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="testGeminiKey()">Test Key</button>' : ''}
+      </div>
+    </div>
+    <div class="card mt">
+      <h3>GitHub Gist Cloud Sync</h3>
+      <div class="setting-row" style="border:none">
+        <span class="setting-label">Personal Access Token</span>
+      </div>
+      <input class="search-input" type="password" placeholder="Paste your GitHub token..." value="${state.settings.githubGistToken}" oninput="state.settings.githubGistToken=this.value.trim();saveState()" style="font-size:13px">
+      ${state.settings.githubGistToken ? '<div style="font-size:11px;color:var(--green);margin-top:4px">&#10003; Token saved</div>' : ''}
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="showGistSetupGuide()">How to get a token?</button>
+        ${state.settings.githubGistToken ? '<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="testGistToken()">Test Token</button>' : ''}
+      </div>
     </div>
     <div class="card mt">
       <h3>Danger Zone</h3>
