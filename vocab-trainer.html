@@ -1698,9 +1698,49 @@ function showUsageGuide(){
       <div class="card card-sm mb" style="border-left:3px solid var(--accent)">
         <h3 style="color:var(--accent2)">Getting Started</h3>
         <div style="font-size:13px;color:var(--text2);line-height:1.7">
-          1. <b>Add Gemini API key</b> (bottom of Settings) to enable AI features<br>
+          1. <b>Set up Gemini API key</b> (see below) to enable AI features<br>
           2. <b>Add words</b> via: Words tab &rarr; Add Words (manual or AI suggest)<br>
           3. <b>Start learning</b> with Quiz, Flashcards, or Free Chat on the Home screen
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid #fdcb6e">
+        <h3 style="color:#fdcb6e">Setting Up Gemini API Key (Required for AI)</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          <b>Step 1:</b> Open <span style="color:var(--accent2)">aistudio.google.com</span> in your browser<br>
+          <b>Step 2:</b> Sign in with your Google account<br>
+          <b>Step 3:</b> Click <b>"Get API Key"</b> in the left menu<br>
+          <b>Step 4:</b> Click <b>"Create API Key"</b> &rarr; select any project (or create one)<br>
+          <b>Step 5:</b> Copy the key (starts with <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">AIza...</code>)<br>
+          <b>Step 6:</b> Scroll to bottom of Settings &rarr; paste into <b>Gemini AI</b> &rarr; API Key field<br>
+          <b>Step 7:</b> Tap <b>"Test Key"</b> to verify it works<br><br>
+          <span style="color:var(--green)">&#10003; Free tier:</span> 15 requests/minute, plenty for personal use<br>
+          <span style="color:var(--orange)">&#9888; Keep your key private</span> &mdash; don't share it with others
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid #636e72">
+        <h3 style="color:var(--text2)">Setting Up Google Cloud TTS (Optional, better voice)</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          Skip this if browser TTS is good enough for you.<br><br>
+          <b>Step 1:</b> Go to <span style="color:var(--accent2)">console.cloud.google.com</span><br>
+          <b>Step 2:</b> Create a project (or use existing one)<br>
+          <b>Step 3:</b> Go to <b>APIs &amp; Services</b> &rarr; <b>Enable APIs</b> &rarr; search <b>"Cloud Text-to-Speech API"</b> &rarr; Enable<br>
+          <b>Step 4:</b> Go to <b>Credentials</b> &rarr; <b>Create Credentials</b> &rarr; <b>API Key</b><br>
+          <b>Step 5:</b> Copy the key &rarr; paste into Settings &rarr; TTS Provider: Google Cloud &rarr; API Key field<br><br>
+          <span style="color:var(--green)">&#10003; Free tier:</span> 1 million characters/month
+        </div>
+      </div>
+
+      <div class="card card-sm mb" style="border-left:3px solid #6c5ce7">
+        <h3 style="color:var(--accent2)">Setting Up GitHub Gist Sync (Optional)</h3>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8">
+          For syncing data between devices (phone &harr; computer).<br><br>
+          <b>Step 1:</b> Go to <span style="color:var(--accent2)">github.com/settings/tokens</span><br>
+          <b>Step 2:</b> Click <b>"Generate new token (classic)"</b><br>
+          <b>Step 3:</b> Name it anything, select <b>"gist"</b> scope only<br>
+          <b>Step 4:</b> Click Generate &rarr; copy the token (starts with <code style="background:var(--bg3);padding:1px 4px;border-radius:3px">ghp_...</code>)<br>
+          <b>Step 5:</b> Paste into Settings &rarr; <b>GitHub Gist Cloud Sync</b> &rarr; Token field
         </div>
       </div>
 
@@ -1790,8 +1830,15 @@ function renderSettings(el){
           '<button class="btn btn-sm" style="width:auto" onclick="requestNotificationPermission()">Enable</button>'
         }
       </div>
-      ${state.settings.notifications?.enabled ? '<div style="font-size:12px;color:var(--green);margin-top:4px">&#10003; Reminders at 8:00 AM, 12:00 PM, 10:00 PM</div>' :
-        '<div style="font-size:12px;color:var(--text3);margin-top:4px">Get reminded to practice at 8:00 AM, 12:00 PM, and 10:00 PM</div>'}
+      <div style="margin-top:8px;font-size:12px;color:var(--text3);margin-bottom:6px">Reminder times (tap to edit):</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        ${(state.settings.notifications?.times||['08:00','12:00','22:00']).map((t,i)=>`
+          <input type="time" value="${t}" style="background:var(--bg3);color:var(--text);border:1px solid var(--bg4);border-radius:6px;padding:6px 8px;font-size:14px;width:110px" onchange="state.settings.notifications.times[${i}]=this.value;saveState()">
+        `).join('')}
+        <button style="background:none;border:none;color:var(--accent2);font-size:20px;cursor:pointer;padding:4px" onclick="state.settings.notifications.times.push('09:00');saveState();renderSettings(document.getElementById('screen-settings'))" title="Add time">+</button>
+        ${(state.settings.notifications?.times||[]).length > 1 ? '<button style="background:none;border:none;color:var(--red);font-size:12px;cursor:pointer;padding:4px" onclick="state.settings.notifications.times.pop();saveState();renderSettings(document.getElementById(\'screen-settings\'))" title="Remove last">&minus; Remove</button>' : ''}
+      </div>
+      ${state.settings.notifications?.enabled ? '<div style="font-size:11px;color:var(--green);margin-top:6px">&#10003; Notifications active</div>' : ''}
     </div>
     <div class="card">
       <div class="setting-row">
