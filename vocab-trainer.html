@@ -896,7 +896,7 @@ function renderQuizQuestion(){
     </div>
     <div id="quiz-feedback"></div>`;
   startTimer();
-  if(state.settings.autoPlayAudio && showWord) speak(word.word);
+  if(state.settings.autoPlayAudio) speak(showWord ? word.word : word.definition);
 }
 
 let timerInterval = null;
