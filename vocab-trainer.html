@@ -383,6 +383,7 @@ if(state.settings.ttsMonthlyLimit <= 5000) state.settings.ttsMonthlyLimit = 9000
 if(!state.ttsUsage.chars && state.ttsUsage.chars !== 0) state.ttsUsage.chars = 0;
 if(!state.settings.githubGistToken) state.settings.githubGistToken = '';
 if(!state.settings.notifications) state.settings.notifications = {enabled:false, times:['08:00','12:00','22:00']};
+if(state.settings.autoPlayAudio === undefined) state.settings.autoPlayAudio = true;
 if(!state._lastNotifTimes) state._lastNotifTimes = {};
 
 function applyTheme(){
@@ -895,6 +896,7 @@ function renderQuizQuestion(){
     </div>
     <div id="quiz-feedback"></div>`;
   startTimer();
+  if(state.settings.autoPlayAudio && showWord) speak(word.word);
 }
 
 let timerInterval = null;
@@ -1130,6 +1132,7 @@ function renderFlashcard(el){
       <button class="btn btn-ghost btn-sm" onclick="skipFlashcard()" style="font-size:12px">&#8594; Later</button>
       <button class="btn btn-ghost btn-sm" onclick="markKnownFlashcard()" style="font-size:12px;color:var(--green)">&#10003; Know</button>
     </div>`;
+  if(state.settings.autoPlayAudio && !flashcardState.flipped) speak(word.word);
 }
 
 function flipCard(){
@@ -1860,6 +1863,13 @@ function renderSettings(el){
           </select>
           <input type="number" min="1" max="100" value="${s.quizLength}" style="width:60px;display:${![5,10,15,20].includes(s.quizLength)?'inline-block':'none'};background:var(--bg3);color:var(--text);border:1px solid var(--bg4);border-radius:6px;padding:6px;font-size:14px;text-align:center" onchange="const v=Math.max(1,Math.min(100,+this.value||10));this.value=v;state.settings.quizLength=v;saveState()">
         </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Auto-play audio (Quiz &amp; Cards)</span>
+        <select onchange="state.settings.autoPlayAudio=this.value==='on';saveState()">
+          <option value="on" ${s.autoPlayAudio!==false?'selected':''}>On</option>
+          <option value="off" ${s.autoPlayAudio===false?'selected':''}>Off</option>
+        </select>
       </div>
       <div class="setting-row">
         <span class="setting-label">Voice recognition</span>
