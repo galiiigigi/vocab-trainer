@@ -3065,6 +3065,12 @@ function renderEarTraining(el){
         <div><h3 style="margin:0">Minimal Pairs</h3><p style="font-size:12px;color:var(--text3);margin:0">Which word did you hear? Train similar sounds</p></div>
       </div>
     </div>
+    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startEarShadowing()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#128483;</span>
+        <div><h3 style="margin:0">Shadowing / Repeat</h3><p style="font-size:12px;color:var(--text3);margin:0">Listen to a sentence, repeat it, get AI pronunciation feedback</p></div>
+      </div>
+    </div>
     <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startEarListening()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:28px">&#127897;</span>
@@ -3086,6 +3092,7 @@ function startEarDictation(){
 function renderEarActive(el){
   if(earState.mode==='dictation') renderDictation(el);
   else if(earState.mode==='pairs') renderMinimalPairs(el);
+  else if(earState.mode==='shadowing') renderShadowing(el);
   else if(earState.mode==='listening') renderListening(el);
 }
 
@@ -3200,6 +3207,178 @@ function answerPair(choice){
   if(correct) earState.score++;
   earState.results[earState.current] = { choice, target:earState.currentTarget, correct };
   renderEarActive(document.getElementById('screen-ear'));
+}
+
+// --- Shadowing / Repeat Mode ---
+let shadowRec = null;
+
+function startEarShadowing(){
+  if(!state.settings.apiKey){ toast('Add Gemini API key in Settings'); goTo('settings'); return; }
+  const active = WORDS.filter(w=>w.example && w.example.length > 10);
+  if(active.length < 3){ toast('Not enough words with example sentences'); return; }
+  shuffle(active);
+  earState = { mode:'shadowing', words:active.slice(0,8), current:0, score:0, results:[], ended:false };
+  shadowRec = null;
+  goTo('ear');
+}
+
+function renderShadowing(el){
+  if(earState.current >= earState.words.length){ renderShadowingSummary(el); return; }
+  const w = earState.words[earState.current];
+  const result = earState.results[earState.current];
+  const isRec = shadowRec && shadowRec.recording;
+
+  el.innerHTML = `
+    <div class="progress-bar"><div class="progress-fill" style="width:${(earState.current/earState.words.length)*100}%"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text3);margin-bottom:12px">
+      <span>${earState.current+1} / ${earState.words.length}</span>
+      <button onclick="endSessionEarly('ear')" style="background:none;border:none;color:var(--red);font-size:12px;font-weight:600;cursor:pointer">&#10005; End</button>
+      <span>Score: ${earState.score}</span>
+    </div>
+    <div class="card text-center mb">
+      <div style="font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">&#128483; Listen, then repeat</div>
+      <div style="font-size:14px;color:var(--text);margin-bottom:12px;font-style:italic">"${w.example}"</div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="speak(\`${w.example.replace(/`/g,'').replace(/'/g,"\\'")}\`)" style="font-size:16px">&#128264; Listen</button>
+        <button class="btn btn-ghost btn-sm" onclick="speakSlow(\`${w.example.replace(/`/g,'').replace(/'/g,"\\'")}\`)" style="font-size:12px">&#128034; Slow</button>
+      </div>
+    </div>
+    ${!result ? `
+      <div class="card text-center mb">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your turn — record yourself saying the sentence</div>
+        <button class="btn ${isRec?'btn-red':''}" onclick="toggleShadowRecord()" style="font-size:20px;width:72px;height:72px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center">
+          ${isRec ? '&#9899;' : '&#127908;'}
+        </button>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">${isRec ? 'Recording... tap to stop' : 'Tap to start recording'}</div>
+        ${shadowRec && shadowRec.blobUrl && !isRec ? `
+          <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="playShadowRecording()">&#9654; Play back</button>
+            <button class="btn btn-sm" onclick="submitShadowRecording()" style="background:var(--accent)">&#129302; Get AI Feedback</button>
+            <button class="btn btn-ghost btn-sm" onclick="shadowRec=null;renderShadowing(document.getElementById('screen-ear'))">&#128260; Re-record</button>
+          </div>
+        ` : ''}
+        <div id="shadow-loading"></div>
+      </div>
+    ` : `
+      <div class="card mb">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:700;font-size:14px;color:${result.rating==='Good'?'var(--green)':result.rating==='Needs Work'?'var(--orange)':'var(--red)'}">${result.rating || 'Evaluated'}</span>
+          ${result.blobUrl ? '<button class="btn btn-ghost btn-sm" onclick="playShadowResult('+earState.current+')" style="font-size:12px">&#9654; Replay</button>' : ''}
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">${result.feedback.replace(/\n/g,'<br>')}</div>
+        <div style="font-size:12px;color:var(--accent2);margin-top:8px">Word: <strong>${w.word}</strong> — ${w.definition}</div>
+      </div>
+      <button class="btn" onclick="shadowRec=null;earState.current++;renderShadowing(document.getElementById('screen-ear'))">Next &#8594;</button>
+    `}`;
+  if(!result && !shadowRec) setTimeout(()=>speak(w.example), 300);
+}
+
+async function toggleShadowRecord(){
+  if(shadowRec && shadowRec.recording){
+    // Stop
+    shadowRec.recording = false;
+    if(shadowRec.recorder && shadowRec.recorder.state === 'recording'){
+      shadowRec.recorder.onstop = () => {
+        if(shadowRec.stream) shadowRec.stream.getTracks().forEach(t=>t.stop());
+        if(shadowRec.chunks.length){
+          const blob = new Blob(shadowRec.chunks, {type:'audio/webm'});
+          shadowRec.blobUrl = URL.createObjectURL(blob);
+        }
+        renderShadowing(document.getElementById('screen-ear'));
+      };
+      shadowRec.recorder.stop();
+    }
+  } else {
+    // Start
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      shadowRec = { recording:true, recorder:null, stream, chunks:[], blobUrl:null };
+      try{ shadowRec.recorder = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'}); }
+      catch(e){ shadowRec.recorder = new MediaRecorder(stream); }
+      shadowRec.recorder.ondataavailable = e => { if(e.data.size>0) shadowRec.chunks.push(e.data); };
+      shadowRec.recorder.start();
+      renderShadowing(document.getElementById('screen-ear'));
+    }catch(e){ toast('Microphone access denied'); }
+  }
+}
+
+function playShadowRecording(){
+  if(shadowRec && shadowRec.blobUrl) new Audio(shadowRec.blobUrl).play();
+}
+
+function playShadowResult(idx){
+  const r = earState.results[idx];
+  if(r && r.blobUrl) new Audio(r.blobUrl).play();
+}
+
+async function submitShadowRecording(){
+  if(!shadowRec || !shadowRec.blobUrl) return;
+  const loadEl = document.getElementById('shadow-loading');
+  if(loadEl) loadEl.innerHTML = '<div class="ai-loading" style="margin-top:12px"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--text3);margin-top:4px">AI is evaluating...</div>';
+
+  const w = earState.words[earState.current];
+  const resp = await fetch(shadowRec.blobUrl);
+  const blob = await resp.blob();
+  const base64 = await new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.readAsDataURL(blob);
+  });
+
+  const prompt = `The learner is practicing English shadowing (repeat-after-me). They tried to say this sentence:
+"${w.example}"
+
+Listen to their recording and evaluate:
+1. **Overall Rating**: Good / Needs Work / Keep Practicing
+2. **Accuracy**: Did they say all the words correctly? Note any missing or wrong words.
+3. **Pronunciation**: Point out specific sounds or words that need improvement. Give tips.
+4. **Fluency**: Was it smooth and natural, or choppy/hesitant?
+
+Give feedback in BOTH English and Chinese (中文). Keep it brief and encouraging (5-7 lines max). Start with the rating on the first line like: "Rating: Good"`;
+
+  const result = await callGeminiWithAudio(base64, 'audio/webm', prompt, 'You are a friendly, encouraging English pronunciation coach for ESL learners in Canada. Give specific, actionable feedback. Always start with the overall rating.');
+
+  if(result){
+    // Extract rating from response
+    let rating = 'Evaluated';
+    if(/good/i.test(result.split('\n')[0])) rating = 'Good';
+    else if(/needs?\s*work/i.test(result.split('\n')[0])) rating = 'Needs Work';
+    else if(/keep\s*practicing/i.test(result.split('\n')[0])) rating = 'Keep Practicing';
+
+    const isGood = rating === 'Good';
+    if(isGood) earState.score++;
+    earState.results[earState.current] = { feedback:result, rating, blobUrl:shadowRec.blobUrl, word:w };
+    updateSRS(w.id, isGood ? 4 : 2, isGood ? 2 : 5);
+    recordActivity(isGood);
+  } else {
+    earState.results[earState.current] = { feedback:'Could not evaluate. Check your Gemini API key.', rating:'Error', blobUrl:shadowRec.blobUrl, word:w };
+  }
+  renderShadowing(document.getElementById('screen-ear'));
+}
+
+function renderShadowingSummary(el){
+  earState.ended = true;
+  const total = earState.words.length;
+  const pct = total > 0 ? Math.round(earState.score / total * 100) : 0;
+  el.innerHTML = `
+    <div class="text-center" style="padding-top:40px">
+      <div style="font-size:48px;margin-bottom:8px">${pct>=80?'&#127942;':pct>=50?'&#128170;':'&#128483;'}</div>
+      <h2>Shadowing Complete!</h2>
+      <p class="subtitle">${earState.score} / ${total} rated Good (${pct}%)</p>
+    </div>
+    <div class="card mt" style="text-align:left">
+      ${earState.results.map((r,i)=>`<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:${r.rating==='Good'?'var(--green)':r.rating==='Needs Work'?'var(--orange)':'var(--red)'}">
+            &#${r.rating==='Good'?'10003':'10007'}; <strong>${r.word.word}</strong>
+          </span>
+          <span style="font-size:11px;color:var(--text3)">${r.rating}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-top:2px">"${r.word.example}"</div>
+      </div>`).join('')}
+    </div>
+    <button class="btn mt" onclick="earState=null;startEarShadowing()">Try Again</button>
+    <button class="btn btn-ghost mt" onclick="earState=null;goTo('home')">Home</button>`;
 }
 
 // --- Listening Comprehension Mode (AI) ---
