@@ -1680,10 +1680,14 @@ function renderWordList(el){
   const cats = ['all', ...Object.keys(CATEGORIES)];
   el.innerHTML = `
     <h2>Word List</h2>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
       <button class="btn btn-sm btn-ghost" style="flex:1" onclick="goTo('addwords')">+ Add Words</button>
       <button class="btn btn-sm btn-ghost" style="flex:1" onclick="goTo('pretest')">Get Word Packs</button>
       <button class="btn btn-sm btn-ghost" style="flex:1" onclick="findDuplicateWords()">Find Duplicates</button>
+    </div>
+    <div style="margin-bottom:12px">
+      <button class="btn btn-sm btn-ghost" onclick="batchRephraseWords()" style="border:1px solid var(--accent2);color:var(--accent2);font-size:11px">&#128260; AI Rephrase Learning Words</button>
+      <div id="batch-rephrase-status"></div>
     </div>
     <input class="search-input mb" id="word-search-input" placeholder="Search words..." value="${wordSearch}" oninput="wordSearch=this.value;updateWordListResults()">
     <div class="filter-chips mb">
@@ -2012,7 +2016,10 @@ function showWordDetail(wordId){
           <div>Last quality: ${wp.lastQuality !== null ? qualityLabel(wp.lastQuality) : 'N/A'}${wp.lastRT ? ' ('+wp.lastRT.toFixed(1)+'s)' : ''}</div>
         </div>
       </div>` : ''}
-      ${state.settings.apiKey ? `<button class="btn btn-ghost btn-sm mt" onclick="aiExplainWord(${w.id})">&#10022; Explain with AI</button><div id="ai-explain-content" class="mt"></div>` : ''}
+      ${state.settings.apiKey ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" onclick="aiExplainWord(${w.id})">&#10022; Explain with AI</button>
+        <button class="btn btn-ghost btn-sm" onclick="aiRephraseWord(${w.id})" style="border:1px solid var(--accent2);color:var(--accent2)">&#128260; AI Rephrase</button>
+      </div><div id="ai-explain-content" class="mt"></div>` : ''}
       ${getWordStatus(w.id)!=='new' ? `<button class="btn btn-ghost btn-sm mt" onclick="markWordAsNew(${w.id})" style="color:var(--orange)">Reset to New</button>` : ''}
       <button class="btn btn-red btn-sm mt" onclick="deleteWordById(${w.id});closeModal()">Delete Word</button>
     </div>
@@ -4938,6 +4945,139 @@ Keep everything SHORT and use simple English. Format with bullet points using -.
     explainEl.innerHTML = `<div class="chat-feedback">${result.replace(/\n/g,'<br>')}</div>`;
   } else {
     explainEl.innerHTML = '<div style="color:var(--red);font-size:13px">Could not get explanation. Check your API key.</div>';
+  }
+}
+
+async function aiRephraseWord(wordId){
+  const w = WORDS.find(x=>x.id===wordId);
+  if(!w) return;
+  const explainEl = document.getElementById('ai-explain-content');
+  if(explainEl) explainEl.innerHTML = '<div class="ai-loading"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--text3);margin-top:4px">AI is rephrasing...</div>';
+
+  const prompt = `Rephrase the definition and example sentence for the English word/phrase "${w.word}".
+
+Current definition: ${w.definition}
+Current example: ${w.example || 'none'}
+Category: ${CATEGORIES[w.category] || w.category}
+
+Requirements:
+- Write a NEW, DIFFERENT definition that explains the same meaning from a different angle
+- Use simpler or more vivid language than the current definition
+- Write a NEW example sentence that is completely different from the current one
+- The example should be natural and relevant to daily life in Canada
+- Keep the definition concise (1-2 sentences max)
+
+Reply in EXACTLY this JSON format, no extra text:
+{"definition":"new definition here","example":"new example sentence here"}`;
+
+  const result = await callGemini([{role:'user',text:prompt}],'You are an ESL vocabulary teacher. Rephrase definitions to help learners see the word from a fresh perspective. Reply only with valid JSON.');
+  if(!result){
+    if(explainEl) explainEl.innerHTML = '<div style="color:var(--red);font-size:13px">Could not rephrase. Check your API key.</div>';
+    return;
+  }
+  try{
+    const cleaned = result.replace(/```json?\n?/g,'').replace(/```/g,'').trim();
+    const data = JSON.parse(cleaned);
+    if(!data.definition){ throw new Error('Missing definition'); }
+
+    const oldDef = w.definition;
+    const oldExample = w.example;
+
+    // Update customWords
+    const cw = state.customWords.find(c => c.word.toLowerCase() === w.word.toLowerCase());
+    if(cw){
+      cw.definition = data.definition;
+      if(data.example) cw.example = data.example;
+      saveState();
+      rebuildWords();
+    }
+
+    if(explainEl) explainEl.innerHTML = `<div class="card card-sm" style="background:var(--bg3)">
+      <div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:6px">&#10003; Definition rephrased!</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:2px">Old: <s>${oldDef}</s></div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:6px">New: ${data.definition}</div>
+      ${data.example ? `<div style="font-size:12px;color:var(--text3);margin-bottom:2px">Old example: <s>${oldExample||'none'}</s></div>
+      <div style="font-size:13px;color:var(--text);font-style:italic">"${data.example}"</div>` : ''}
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" onclick="aiRephraseWord(${wordId})" style="font-size:11px">&#128260; Rephrase again</button>
+        <button class="btn btn-ghost btn-sm" onclick="undoRephrase(${wordId},\`${btoa(unescape(encodeURIComponent(oldDef)))}\`,\`${btoa(unescape(encodeURIComponent(oldExample||'')))}\`)" style="font-size:11px;color:var(--orange)">&#8617; Undo</button>
+      </div>
+    </div>`;
+  }catch(e){
+    console.error('Rephrase parse error:', e, result);
+    if(explainEl) explainEl.innerHTML = `<div style="color:var(--red);font-size:13px">AI response format error. Try again.</div>`;
+  }
+}
+
+function undoRephrase(wordId, defB64, exB64){
+  const oldDef = decodeURIComponent(escape(atob(defB64)));
+  const oldExample = decodeURIComponent(escape(atob(exB64)));
+  const w = WORDS.find(x=>x.id===wordId);
+  if(!w) return;
+  const cw = state.customWords.find(c => c.word.toLowerCase() === w.word.toLowerCase());
+  if(cw){
+    cw.definition = oldDef;
+    if(oldExample) cw.example = oldExample;
+    saveState();
+    rebuildWords();
+    toast('Reverted to original definition');
+    showWordDetail(wordId);
+  }
+}
+
+async function batchRephraseWords(){
+  if(!state.settings.apiKey){ toast('Add Gemini API key in Settings'); goTo('settings'); return; }
+  const learningWords = WORDS.filter(w => {
+    const s = getWordStatus(w.id);
+    return s === 'learning' || s === 'beginner';
+  });
+  if(!learningWords.length){ toast('No learning/beginner words to rephrase'); return; }
+  const statusEl = document.getElementById('batch-rephrase-status');
+  const count = Math.min(learningWords.length, 10);
+  shuffle(learningWords);
+  const batch = learningWords.slice(0, count);
+
+  if(statusEl) statusEl.innerHTML = `<div style="font-size:12px;color:var(--accent2);margin-top:6px">Rephrasing ${count} words...</div>`;
+
+  const wordList = batch.map(w => `- "${w.word}": current definition: "${w.definition}", current example: "${w.example||'none'}"`).join('\n');
+  const prompt = `Rephrase the definitions and example sentences for these English vocabulary words. Use different angles, simpler or more vivid language, and completely new examples relevant to daily life in Canada.
+
+${wordList}
+
+Reply in EXACTLY this JSON format, no extra text:
+[{"word":"...","definition":"new definition","example":"new example sentence"},...]
+
+Requirements:
+- Each new definition must be DIFFERENT from the current one (different wording, different angle)
+- Each new example must be a COMPLETELY DIFFERENT sentence
+- Keep definitions concise (1-2 sentences)
+- Examples should be natural Canadian English`;
+
+  const result = await callGemini([{role:'user',text:prompt}],'You are an ESL vocabulary teacher. Rephrase definitions to help learners see words from fresh perspectives. Reply only with valid JSON array.');
+  if(!result){
+    if(statusEl) statusEl.innerHTML = '<div style="color:var(--red);font-size:12px;margin-top:6px">Failed. Check API key.</div>';
+    return;
+  }
+  try{
+    const cleaned = result.replace(/```json?\n?/g,'').replace(/```/g,'').trim();
+    const data = JSON.parse(cleaned);
+    let updated = 0;
+    for(const item of data){
+      if(!item.word || !item.definition) continue;
+      const cw = state.customWords.find(c => c.word.toLowerCase() === item.word.toLowerCase());
+      if(cw){
+        cw.definition = item.definition;
+        if(item.example) cw.example = item.example;
+        updated++;
+      }
+    }
+    saveState();
+    rebuildWords();
+    if(statusEl) statusEl.innerHTML = `<div style="font-size:12px;color:var(--green);margin-top:6px">&#10003; Rephrased ${updated} words!</div>`;
+    updateWordListResults();
+  }catch(e){
+    console.error('Batch rephrase error:', e);
+    if(statusEl) statusEl.innerHTML = '<div style="color:var(--red);font-size:12px;margin-top:6px">AI response format error. Try again.</div>';
   }
 }
 
