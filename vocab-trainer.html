@@ -2383,25 +2383,31 @@ function renderSettings(el){
       <div id="word-pack-area"></div>
     </div>
     <div class="card mt">
-      <h3>Sync Code</h3>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Transfer data between devices. Select what to include:</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px" id="sync-options">
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-words" checked> Words</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-progress" checked> Progress</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-settings" checked> Settings</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer"><input type="checkbox" id="sync-stats" checked> Stats</label>
-        <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--orange);cursor:pointer"><input type="checkbox" id="sync-apikeys" onchange="document.getElementById('gist-export-btn').disabled=this.checked;document.getElementById('gist-apikey-warn').style.display=this.checked?'block':'none'"> API Keys</label>
+      <h3>&#10022; Quick Add from Gemini</h3>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Paste JSON from your Gemini "学英语" chats to add words. Supports multiple formats automatically.</div>
+      <textarea class="form-input" id="gemini-import-input" placeholder='Paste JSON here — examples:
+
+[{"word":"potluck","definition":"...","example":"..."}]
+
+{"words":[{"word":"potluck","meaning":"..."}]}
+
+or even: {"potluck":"a meal where everyone brings a dish"}' style="font-size:12px;min-height:100px"></textarea>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-sm" onclick="parseGeminiImport()">Parse &amp; Preview</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('gemini-import-input').value='';document.getElementById('gemini-import-preview').innerHTML=''" style="font-size:11px">Clear</button>
       </div>
+      <div id="gemini-import-preview"></div>
+    </div>
+    <div class="card mt">
+      <h3>Sync</h3>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Transfer data between devices</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
-        <button class="btn btn-ghost btn-sm" onclick="generateSyncCode()">Export Sync Code</button>
-        <button class="btn btn-ghost btn-sm" onclick="showImportSyncCode()">Import Sync Code</button>
         <button class="btn btn-ghost btn-sm" onclick="exportSyncFile()">Export .json File</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('sync-file-input').click()">Import .json File</button>
         <input type="file" id="sync-file-input" accept=".json" style="display:none" onchange="importSyncFile(this)">
-        <button class="btn btn-ghost btn-sm" id="gist-export-btn" onclick="exportToGist()">Export to GitHub Gist</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportToGist()">Export to GitHub Gist</button>
         <button class="btn btn-ghost btn-sm" onclick="importFromGist()">Import from GitHub Gist</button>
       </div>
-      <div style="font-size:11px;color:var(--orange);margin-top:6px;display:none" id="gist-apikey-warn">&#9888; Uncheck "API Keys" to export to GitHub Gist (Gist data is not encrypted)</div>
       <div id="sync-code-area"></div>
     </div>
     <div class="card mt">
@@ -2469,13 +2475,7 @@ function stripApiKeys(settings){
 }
 
 function getSyncOptions(){
-  return {
-    words: document.getElementById('sync-words')?.checked ?? true,
-    progress: document.getElementById('sync-progress')?.checked ?? true,
-    settings: document.getElementById('sync-settings')?.checked ?? true,
-    stats: document.getElementById('sync-stats')?.checked ?? true,
-    apiKeys: document.getElementById('sync-apikeys')?.checked ?? false
-  };
+  return { words:true, progress:true, settings:true, stats:true, apiKeys:false };
 }
 
 function getExportSettings(opt){
@@ -2483,89 +2483,149 @@ function getExportSettings(opt){
   return opt.apiKeys ? state.settings : stripApiKeys(state.settings);
 }
 
-function generateSyncCode(){
-  const opt = getSyncOptions();
-  const syncData = { v: 3 };
-  if(opt.words){
-    syncData.cw = state.customWords || [];
-    syncData.ash = state.aiSuggestHistory || [];
-  }
-  if(opt.progress){
-    syncData.wp = state.wordProgress;
-  }
-  if(opt.settings){
-    syncData.st = getExportSettings(opt);
-    syncData.tu = state.ttsUsage;
-  }
-  if(opt.stats){
-    syncData.da = state.dailyActivity;
-    syncData.s = state.streak;
-    syncData.la = state.lastActiveDate;
-    syncData.tq = state.totalQuizzes;
-    syncData.tc = state.totalCorrect;
-    syncData.ta = state.totalAnswered;
-  }
-  const json = JSON.stringify(syncData);
-  const code = btoa(unescape(encodeURIComponent(json)));
-  const area = document.getElementById('sync-code-area');
-  const apiWarn = opt.settings && opt.apiKeys ? '<div style="font-size:11px;color:var(--orange);margin-top:6px">&#9888; This export contains your API keys. Keep it secure and do not share.</div>' : '';
-  area.innerHTML = `
-    <textarea class="form-input" style="font-size:11px;min-height:80px;margin-top:8px;word-break:break-all" id="sync-code-output" readonly>${code}</textarea>
-    <button class="btn btn-sm mt" onclick="copySyncCode()">Copy to Clipboard</button>
-    <div style="font-size:11px;color:var(--text3);margin-top:4px">${code.length} chars &middot; Includes: ${[opt.words?'words':'',opt.progress?'progress':'',opt.settings?'settings':'',opt.stats?'stats':''].filter(Boolean).join(', ')}</div>${apiWarn}`;
+// ===== GEMINI IMPORT (Smart JSON Parser) =====
+let geminiImportPending = null;
+
+function parseGeminiImport(){
+  const el = document.getElementById('gemini-import-input');
+  const preview = document.getElementById('gemini-import-preview');
+  if(!el || !preview) return;
+  let raw = el.value.trim();
+  if(!raw){ toast('Paste some JSON first'); return; }
+
+  // Strip markdown code fences if present
+  raw = raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim();
+
+  let parsed;
+  try{ parsed = JSON.parse(raw); }catch(e){ toast('Invalid JSON: '+e.message); return; }
+
+  // Normalize to array of word objects
+  const words = normalizeGeminiWords(parsed);
+  if(!words || !words.length){ toast('Could not find any words in the JSON'); return; }
+
+  // Dedupe against existing library
+  const existing = new Set(WORDS.map(w=>w.word.toLowerCase()));
+  const newWords = words.filter(w => !existing.has(w.word.toLowerCase()));
+  const dupes = words.length - newWords.length;
+  geminiImportPending = newWords;
+
+  preview.innerHTML = `
+    <div style="margin-top:10px;font-size:13px;color:var(--text2)">
+      Found <b>${words.length}</b> words${dupes>0?' <span style="color:var(--text3)">('+dupes+' already in library)</span>':''}
+    </div>
+    ${newWords.length > 0 ? `
+      <div style="max-height:240px;overflow-y:auto;margin:8px 0;border:1px solid var(--bg4);border-radius:8px;padding:4px 8px">
+        ${newWords.map((w,i) => `<div style="padding:5px 0;border-bottom:1px solid var(--bg3);font-size:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <b style="color:var(--text)">${w.word}</b>
+            ${w.phonetic?'<span style="color:var(--accent2);font-size:11px">/'+w.phonetic+'/</span>':''}
+          </div>
+          <div style="color:var(--text2)">${w.definition}</div>
+          ${w.example?'<div style="color:var(--text3);font-style:italic;font-size:11px">"'+w.example+'"</div>':''}
+        </div>`).join('')}
+      </div>
+      <button class="btn btn-sm" onclick="importGeminiWords()">Add ${newWords.length} Words to Library</button>
+    ` : '<div style="color:var(--orange);font-size:12px;margin-top:8px">All words already in your library!</div>'}`;
 }
 
-function copySyncCode(){
-  const el = document.getElementById('sync-code-output');
-  if(!el) return;
-  if(navigator.clipboard){
-    navigator.clipboard.writeText(el.value).then(()=>toast('Copied to clipboard!'));
-  } else {
-    el.select();
-    document.execCommand('copy');
-    toast('Copied!');
+function normalizeGeminiWords(data){
+  // Case 1: Array of word objects [{word,definition,...}]
+  if(Array.isArray(data)){
+    if(data.length && typeof data[0] === 'object' && data[0] !== null){
+      return data.map(normalizeWordObj).filter(Boolean);
+    }
+    return null;
   }
+
+  if(typeof data !== 'object' || data === null) return null;
+
+  // Case 2: {words:[...]} or {vocabulary:[...]} or {word_list:[...]}
+  for(const key of Object.keys(data)){
+    const v = data[key];
+    if(Array.isArray(v) && v.length && typeof v[0] === 'object'){
+      return v.map(normalizeWordObj).filter(Boolean);
+    }
+  }
+
+  // Case 3: {"word": "definition"} flat dictionary
+  const entries = Object.entries(data);
+  if(entries.length && entries.every(([k,v]) => typeof v === 'string')){
+    return entries.map(([word, definition]) => ({
+      word, definition, example:'', category:'custom', difficulty:2, phonetic:'', grammar:null
+    }));
+  }
+
+  // Case 4: {"word": {definition, example, ...}} nested dictionary
+  if(entries.length && entries.every(([k,v]) => typeof v === 'object' && v !== null)){
+    return entries.map(([word, obj]) => {
+      const w = normalizeWordObj({word, ...obj});
+      return w;
+    }).filter(Boolean);
+  }
+
+  return null;
 }
 
-function showImportSyncCode(){
-  const area = document.getElementById('sync-code-area');
-  area.innerHTML = `
-    <textarea class="form-input" style="font-size:11px;min-height:80px;margin-top:8px" id="sync-code-input" placeholder="Paste your sync code here..."></textarea>
-    <button class="btn btn-sm mt" onclick="applySyncCode()">Apply Sync Code</button>`;
+function normalizeWordObj(obj){
+  if(!obj || typeof obj !== 'object') return null;
+  // Flexible field mapping
+  const word = obj.word || obj.term || obj.vocabulary || obj.phrase || obj.name || '';
+  const definition = obj.definition || obj.meaning || obj.def || obj.explanation || obj.describe || obj.description || obj.chinese || obj.translation || obj['中文'] || obj['释义'] || obj['意思'] || '';
+  const example = obj.example || obj.example_sentence || obj.sentence || obj.usage || obj.examples || obj['例句'] || '';
+  const phonetic = obj.phonetic || obj.pronunciation || obj.ipa || obj['发音'] || '';
+  const category = obj.category || obj.type || obj.tag || obj.group || 'custom';
+  const difficulty = obj.difficulty || obj.level || 2;
+
+  if(!word || !definition) return null;
+
+  // Handle example as array
+  const exStr = Array.isArray(example) ? example[0] || '' : String(example);
+
+  return {
+    word: String(word).trim(),
+    definition: String(definition).trim(),
+    example: exStr.trim(),
+    category: mapCategory(String(category).toLowerCase().trim()),
+    difficulty: typeof difficulty === 'number' ? Math.min(3,Math.max(1,difficulty)) : 2,
+    phonetic: String(phonetic).trim(),
+    grammar: obj.grammar || null
+  };
 }
 
-function applySyncCode(){
-  const el = document.getElementById('sync-code-input');
-  if(!el) return;
-  const code = el.value.trim();
-  if(!code){ toast('Paste a sync code first'); return; }
-  try{
-    const json = decodeURIComponent(escape(atob(code)));
-    const data = JSON.parse(json);
-    const imported = [];
-    // Words
-    if(data.cw){ state.customWords = data.cw; imported.push(data.cw.length+' words'); }
-    if(data.ash) state.aiSuggestHistory = data.ash;
-    // Progress
-    if(data.wp){ state.wordProgress = data.wp; imported.push('progress'); }
-    // Settings
-    if(data.st){ Object.assign(state.settings, data.st); applyTheme(); imported.push('settings'); }
-    if(data.tu) state.ttsUsage = data.tu;
-    // Stats
-    if(data.da) state.dailyActivity = data.da;
-    if(data.s !== undefined) state.streak = data.s;
-    if(data.la) state.lastActiveDate = data.la;
-    if(data.tq !== undefined){ state.totalQuizzes = data.tq; imported.push('stats'); }
-    if(data.tc !== undefined) state.totalCorrect = data.tc;
-    if(data.ta !== undefined) state.totalAnswered = data.ta;
-    saveState();
-    rebuildWords();
-    toast('Imported: ' + (imported.join(', ') || 'data'));
-    goTo('home');
-  }catch(e){
-    toast('Invalid sync code!');
-    console.error(e);
-  }
+function mapCategory(cat){
+  const map = {
+    'slang':'slang','俚语':'slang',
+    'workplace':'workplace','work':'workplace','office':'workplace','职场':'workplace','工作':'workplace',
+    'social':'social','社交':'social',
+    'idiom':'idioms','idioms':'idioms','成语':'idioms','习语':'idioms',
+    'food':'food','饮食':'food',
+    'weather':'weather','天气':'weather',
+    'canadian':'canadian','canada':'canadian','加拿大':'canadian',
+    'geography':'geography','地理':'geography',
+    'essential':'essentials','essentials':'essentials','基础':'essentials','日常':'essentials',
+    'engineering':'engineering','技术':'engineering','tech':'engineering',
+    'academic':'academic','学术':'academic',
+    'phrasal verb':'idioms','phrasal_verb':'idioms','短语动词':'idioms'
+  };
+  return map[cat] || 'custom';
+}
+
+function importGeminiWords(){
+  if(!geminiImportPending || !geminiImportPending.length){ toast('No words to import'); return; }
+  if(!state.customWords) state.customWords = [];
+  let added = 0;
+  geminiImportPending.forEach(w => {
+    state.customWords.push(w);
+    added++;
+  });
+  saveState();
+  rebuildWords();
+  geminiImportPending = null;
+  toast(added + ' words added!');
+  const preview = document.getElementById('gemini-import-preview');
+  if(preview) preview.innerHTML = '<div style="color:var(--green);font-size:13px;padding:8px">&#10003; '+added+' words imported successfully!</div>';
+  const input = document.getElementById('gemini-import-input');
+  if(input) input.value = '';
 }
 
 function exportSyncFile(){
