@@ -745,6 +745,8 @@ function qualityClass(q){ return q>=5?'rt-perfect':q>=4?'rt-good':q>=3?'rt-hard'
 
 // ===== NAVIGATION =====
 function goTo(screen){
+  // Stop auto-play when leaving word list
+  if(currentScreen === 'words' && screen !== 'words' && autoPlayState) stopAutoPlay();
   currentScreen = screen;
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -830,6 +832,10 @@ function renderHome(el){
       <button class="btn btn-ghost" style="flex:1;border:1px solid var(--blue);color:var(--blue)" onclick="startChat('star')">&#127775; STAR</button>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--accent2);color:var(--accent2)" onclick="startAudioQuiz()">&#127911; Audio Quiz</button>
+      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--accent2);color:var(--accent2)" onclick="startListeningFlashcards()">&#127911; Listen Cards</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="startVoice()">&#127908; Voice Test</button>
       <button class="btn btn-ghost" style="flex:1;border:1px solid var(--green);color:var(--green)" onclick="goTo('ear')">&#127911; Ear Training</button>
     </div>`;
@@ -844,9 +850,11 @@ function startQuiz(){
 }
 
 function renderQuizStart(el){
+  if(audioQuiz){ renderAudioQuizQuestion(); return; }
   if(!quiz){ el.innerHTML = `<div class="text-center" style="padding-top:40px">
     <h2>Multiple Choice Quiz</h2><p class="subtitle">Test your vocabulary with timed questions</p>
-    <button class="btn" onclick="startQuiz()">Start Quiz</button></div>`; return; }
+    <button class="btn mb" onclick="startQuiz()">Start Quiz</button>
+    <button class="btn btn-ghost" onclick="startAudioQuiz()" style="border:1px solid var(--accent2);color:var(--accent2)">&#127911; Audio-Only Quiz</button></div>`; return; }
   renderQuizQuestion();
 }
 
@@ -1074,6 +1082,211 @@ function renderQuizSummary(el){
   quiz = null;
 }
 
+// ===== AUDIO-ONLY QUIZ =====
+let audioQuiz = null;
+
+function startAudioQuiz(){
+  const words = getSessionWords(state.settings.quizLength);
+  if(words.length < 2){ toast('Not enough words for audio quiz'); return; }
+  audioQuiz = { words, current:0, score:0, totalRT:0, results:{}, startTime:null, answered:false };
+  goTo('quiz');
+  renderAudioQuizQuestion();
+}
+
+function renderAudioQuizQuestion(){
+  const el = document.getElementById('screen-quiz');
+  if(audioQuiz.current >= audioQuiz.words.length){ renderAudioQuizSummary(el); return; }
+  if(audioQuiz.results[audioQuiz.current]){ renderAudioQuizReview(); return; }
+  const word = audioQuiz.words[audioQuiz.current];
+  const distractors = getDistractors(word);
+  // Randomly: hear word → pick definition, or hear definition → pick word
+  const hearWord = Math.random() > 0.5;
+  let choices;
+  if(hearWord){
+    choices = shuffle([word, ...distractors]).map(w => ({id:w.id, text:w.definition, correct:w.id===word.id}));
+  } else {
+    choices = shuffle([word, ...distractors]).map(w => ({id:w.id, text:w.word, correct:w.id===word.id}));
+  }
+  audioQuiz.answered = false;
+  audioQuiz.startTime = performance.now();
+  audioQuiz.currentWord = word;
+  audioQuiz.choices = choices;
+  audioQuiz.hearWord = hearWord;
+
+  el.innerHTML = `
+    <div class="progress-bar"><div class="progress-fill" style="width:${(audioQuiz.current/audioQuiz.words.length)*100}%"></div></div>
+    <div class="learn-nav">
+      <button onclick="prevAudioQuizQ()" ${audioQuiz.current===0?'disabled':''}>&#8592; Previous</button>
+      <button onclick="endAudioQuizEarly()" style="color:var(--red)">&#10005; End</button>
+      <button id="aq-skip-btn" onclick="skipAudioQuizQ()">Skip &#8594;</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:8px">
+      <span>${audioQuiz.current+1} / ${audioQuiz.words.length}</span>
+      <span>Score: ${audioQuiz.score}</span>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">&#127911; ${hearWord ? 'Listen to the word. Pick the correct meaning.' : 'Listen to the definition. Pick the correct word.'}</div>
+      <button class="btn btn-ghost" onclick="speak('${(hearWord ? word.word : word.definition).replace(/'/g,"\\'")}')" style="font-size:32px;width:80px;height:80px;border-radius:50%;margin:8px auto">&#128264;</button>
+      <div style="margin-top:4px">
+        <button class="btn btn-ghost btn-sm" onclick="speakSlow('${(hearWord ? word.word : word.definition).replace(/'/g,"\\'")}')" style="font-size:11px">&#128034; Slow</button>
+      </div>
+    </div>
+    <div class="quiz-choices" id="aq-choices">
+      ${choices.map((c,i) => `<button class="quiz-choice" onclick="answerAudioQuiz(${i})">${c.text}</button>`).join('')}
+    </div>
+    <div class="timer-bar"><div class="timer-fill" id="timer-fill" style="width:100%"></div></div>
+    <div class="btn-row mt" id="aq-skip-row" style="gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="skipAudioQuizQ()" style="font-size:12px">&#8594; Later</button>
+      <button class="btn btn-ghost btn-sm" onclick="dontKnowAudioQuiz()" style="font-size:12px;color:var(--red)">&#10067; Don't Know</button>
+    </div>
+    <div id="aq-feedback"></div>`;
+  startTimer();
+  setTimeout(()=>speak(hearWord ? word.word : word.definition), 200);
+}
+
+function answerAudioQuiz(choiceIdx){
+  if(audioQuiz.answered) return;
+  audioQuiz.answered = true;
+  clearInterval(timerInterval);
+  const rt = (performance.now() - audioQuiz.startTime) / 1000;
+  const choice = audioQuiz.choices[choiceIdx];
+  const correct = choice.correct;
+  const quality = rtToQuality(rt, correct);
+  const word = audioQuiz.currentWord;
+  updateSRS(word.id, quality, rt);
+  recordActivity(correct);
+  state.totalAnswered++;
+  if(correct) state.totalCorrect++;
+  audioQuiz.totalRT += rt;
+  audioQuiz.results[audioQuiz.current] = {word, correct, quality, rt};
+  audioQuiz.score = Object.values(audioQuiz.results).filter(r=>r.correct).length;
+  state.totalQuizzes = Math.ceil(state.totalAnswered / state.settings.quizLength);
+  saveState();
+
+  const btns = document.querySelectorAll('.quiz-choice');
+  btns.forEach((btn, i) => {
+    btn.classList.add('disabled');
+    if(audioQuiz.choices[i].correct) btn.classList.add('correct-reveal','correct');
+    if(i === choiceIdx && !correct) btn.classList.add('wrong');
+  });
+  const skipRow = document.getElementById('aq-skip-row');
+  if(skipRow) skipRow.style.display = 'none';
+
+  const fb = document.getElementById('aq-feedback');
+  fb.innerHTML = `<div class="card card-sm mt">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-weight:700;color:${correct?'var(--green)':'var(--red)'}">${correct?'Correct!':'Wrong!'}</span>
+      <span class="rt-badge ${qualityClass(quality)}">${rt.toFixed(1)}s - ${qualityLabel(quality)}</span>
+    </div>
+    <div style="font-size:13px;color:var(--text2)"><strong>${word.word}</strong>${word.phonetic?' <span style="color:var(--accent2)">/${word.phonetic}/</span>':''} <button class="speak-btn" onclick="speak('${word.word.replace(/'/g,"\\'")}')">&#128264;</button>: ${word.definition}</div>
+    <div style="font-size:12px;color:var(--text3);font-style:italic;margin-top:4px">"${word.example}" <button class="speak-btn" style="font-size:14px" onclick="speakSlow(\`${word.example?word.example.replace(/`/g,''):''}\`)">&#128264;</button></div>
+  </div>
+  <button class="btn mt" onclick="nextAudioQuizQ()">Next &#8594;</button>`;
+}
+
+function dontKnowAudioQuiz(){
+  if(!audioQuiz || audioQuiz.answered) return;
+  audioQuiz.answered = true;
+  clearInterval(timerInterval);
+  const word = audioQuiz.currentWord;
+  updateSRS(word.id, 0, 10);
+  recordActivity(false);
+  state.totalAnswered++;
+  audioQuiz.results[audioQuiz.current] = {word, correct:false, quality:0, rt:0, dontKnow:true};
+  audioQuiz.score = Object.values(audioQuiz.results).filter(r=>r.correct).length;
+  state.totalQuizzes = Math.ceil(state.totalAnswered / state.settings.quizLength);
+  saveState();
+
+  const btns = document.querySelectorAll('.quiz-choice');
+  btns.forEach((btn, i) => {
+    btn.classList.add('disabled');
+    if(audioQuiz.choices[i].correct) btn.classList.add('correct-reveal','correct');
+  });
+  const skipRow = document.getElementById('aq-skip-row');
+  if(skipRow) skipRow.style.display = 'none';
+
+  const fb = document.getElementById('aq-feedback');
+  fb.innerHTML = `<div class="card card-sm mt">
+    <div style="margin-bottom:6px"><span style="font-weight:700;color:var(--orange)">Don't Know</span></div>
+    <div style="font-size:13px;color:var(--text2)"><strong>${word.word}</strong>${word.phonetic?' <span style="color:var(--accent2)">/${word.phonetic}/</span>':''} <button class="speak-btn" onclick="speak('${word.word.replace(/'/g,"\\'")}')">&#128264;</button>: ${word.definition}</div>
+    <div style="font-size:12px;color:var(--text3);font-style:italic;margin-top:4px">"${word.example}" <button class="speak-btn" style="font-size:14px" onclick="speakSlow(\`${word.example?word.example.replace(/`/g,''):''}\`)">&#128264;</button></div>
+  </div>
+  <button class="btn mt" onclick="nextAudioQuizQ()">Next &#8594;</button>`;
+}
+
+function nextAudioQuizQ(){ audioQuiz.current++; renderAudioQuizQuestion(); }
+function prevAudioQuizQ(){ if(audioQuiz.current > 0){ audioQuiz.current--; renderAudioQuizQuestion(); } }
+function skipAudioQuizQ(){
+  if(audioQuiz.answered) return;
+  audioQuiz.answered = true;
+  clearInterval(timerInterval);
+  audioQuiz.results[audioQuiz.current] = {word:audioQuiz.currentWord, correct:false, quality:0, rt:0, skipped:true};
+  audioQuiz.score = Object.values(audioQuiz.results).filter(r=>r.correct).length;
+  audioQuiz.current++;
+  renderAudioQuizQuestion();
+}
+
+function endAudioQuizEarly(){
+  if(!audioQuiz) return;
+  clearInterval(timerInterval);
+  audioQuiz.words.length = audioQuiz.current;
+  renderAudioQuizSummary(document.getElementById('screen-quiz'));
+}
+
+function renderAudioQuizReview(){
+  const el = document.getElementById('screen-quiz');
+  const r = audioQuiz.results[audioQuiz.current];
+  const word = r.word;
+  const totalAnswered = Object.keys(audioQuiz.results).length;
+  el.innerHTML = `
+    <div class="progress-bar"><div class="progress-fill" style="width:${(totalAnswered/audioQuiz.words.length)*100}%"></div></div>
+    <div class="learn-nav">
+      <button onclick="prevAudioQuizQ()" ${audioQuiz.current===0?'disabled':''}>&#8592; Previous</button>
+      <button onclick="audioQuiz.current++;renderAudioQuizQuestion()">Next &#8594;</button>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:8px">
+      <span>${audioQuiz.current+1} / ${audioQuiz.words.length} (Review)</span>
+      <span>Score: ${audioQuiz.score}</span>
+    </div>
+    <div class="card text-center">
+      <div style="font-size:18px;font-weight:700;color:${r.dontKnow?'var(--orange)':r.skipped?'var(--text3)':r.correct?'var(--green)':'var(--red)'}">
+        ${r.dontKnow ? "Didn't Know" : r.skipped ? 'Skipped' : (r.correct ? 'Correct!' : 'Wrong!')}
+      </div>
+      <h2 style="margin-top:8px">${word.word} <button class="speak-btn" onclick="speak('${word.word.replace(/'/g,"\\'")}')">&#128264;</button></h2>
+      ${word.phonetic ? `<div style="font-size:13px;color:var(--accent2);margin-top:2px">/${word.phonetic}/</div>` : ''}
+      <div style="font-size:15px;color:var(--text2);margin-top:8px">${word.definition}</div>
+      <div style="font-style:italic;color:var(--text3);font-size:13px;margin-top:8px">"${word.example}"</div>
+      ${!r.skipped ? `<div class="mt"><span class="rt-badge ${qualityClass(r.quality)}">${r.rt.toFixed(1)}s - ${qualityLabel(r.quality)}</span></div>` : ''}
+    </div>
+    <button class="btn mt" onclick="audioQuiz.current++;renderAudioQuizQuestion()">Continue &#8594;</button>`;
+}
+
+function renderAudioQuizSummary(el){
+  const results = Object.values(audioQuiz.results);
+  const answered = results.filter(r=>!r.skipped);
+  const pct = audioQuiz.words.length > 0 ? Math.round(audioQuiz.score / audioQuiz.words.length * 100) : 0;
+  const avgRT = answered.length > 0 ? (audioQuiz.totalRT / answered.length).toFixed(1) : '0.0';
+  const emoji = pct >= 90 ? '&#127942;' : pct >= 70 ? '&#11088;' : pct >= 50 ? '&#128170;' : '&#128218;';
+  el.innerHTML = `
+    <div class="text-center"><div style="font-size:48px">${emoji}</div>
+    <h2>&#127911; Audio Quiz Complete!</h2></div>
+    <div class="summary-score" style="color:${pct>=70?'var(--green)':'var(--orange)'}">${pct}%</div>
+    <div class="summary-detail">
+      <div class="summary-item"><div class="num">${audioQuiz.score}/${audioQuiz.words.length}</div><div class="label">Correct</div></div>
+      <div class="summary-item"><div class="num">${avgRT}s</div><div class="label">Avg Time</div></div>
+      <div class="summary-item"><div class="num">${results.filter(r=>r.quality>=4).length}</div><div class="label">Fast</div></div>
+    </div>
+    <div class="card mt">
+      ${results.map(r => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.03);font-size:13px">
+        <span style="color:${r.dontKnow?'var(--orange)':r.skipped?'var(--text3)':r.correct?'var(--green)':'var(--red)'}">&#${r.dontKnow?'10067':r.skipped?'10148':r.correct?'10004':'10008'}; ${r.word.word}${r.dontKnow?" (don't know)":r.skipped?' (skipped)':''}</span>
+        <span class="rt-badge ${r.skipped||r.dontKnow?'':qualityClass(r.quality)}" style="font-size:11px">${r.dontKnow?'--':r.skipped?'--':r.rt.toFixed(1)+'s'}</span>
+      </div>`).join('')}
+    </div>
+    <button class="btn mt" onclick="startAudioQuiz()">Try Again</button>
+    <button class="btn btn-ghost mt" onclick="goTo('home')">Home</button>`;
+  audioQuiz = null;
+}
+
 // ===== FLASHCARDS =====
 function startFlashcards(){
   const words = getSessionWords(20);
@@ -1081,23 +1294,76 @@ function startFlashcards(){
   goTo('cards');
 }
 
+function startListeningFlashcards(){
+  const words = getSessionWords(20);
+  flashcardState = { words, current:0, flipped:false, listeningMode:true };
+  goTo('cards');
+}
+
 function renderFlashcardStart(el){
   if(!flashcardState){ el.innerHTML = `<div class="text-center" style="padding-top:40px">
     <h2>Flashcards</h2><p class="subtitle">Tap to flip, then rate yourself</p>
-    <button class="btn" onclick="startFlashcards()">Start Flashcards</button></div>`; return; }
+    <button class="btn mb" onclick="startFlashcards()">Start Flashcards</button>
+    <button class="btn btn-ghost" onclick="startListeningFlashcards()" style="border:1px solid var(--accent2);color:var(--accent2)">&#127911; Listening Mode</button></div>`; return; }
   renderFlashcard(el);
 }
 
 function renderFlashcard(el){
   if(flashcardState.current >= flashcardState.words.length){
+    const isListening = flashcardState.listeningMode;
     el.innerHTML = `<div class="text-center" style="padding-top:40px">
       <h2>All cards reviewed!</h2>
-      <button class="btn mt" onclick="startFlashcards()">Start Again</button>
+      <button class="btn mt" onclick="${isListening?'startListeningFlashcards()':'startFlashcards()'}">Start Again</button>
       <button class="btn btn-ghost mt" onclick="goTo('home')">Home</button></div>`;
     flashcardState = null; return;
   }
   const word = flashcardState.words[flashcardState.current];
   const status = getWordStatus(word.id);
+  const isListening = flashcardState.listeningMode;
+
+  if(isListening){
+    // Listening mode: front = audio only, back = word + definition + example
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:8px">
+        <span>${flashcardState.current+1} / ${flashcardState.words.length}</span>
+        <span style="color:var(--accent2)">&#127911; Listening</span>
+      </div>
+      <div class="learn-nav">
+        <button onclick="prevFlashcard()" ${flashcardState.current===0?'disabled':''}>&#8592; Previous</button>
+        <button onclick="endSessionEarly('cards')" style="color:var(--red)">&#10005; End</button>
+        <button onclick="skipFlashcard()">Skip &#8594;</button>
+      </div>
+      <div class="flashcard-container">
+        <div class="flashcard ${flashcardState.flipped?'flipped':''}" onclick="flipCard()">
+          <div class="flashcard-face flashcard-front" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div style="font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">Listen &amp; guess the word</div>
+            <button class="speak-btn" onclick="event.stopPropagation();speak('${word.word.replace(/'/g,"\\'")}');" style="font-size:36px;width:80px;height:80px;border-radius:50%;background:var(--bg3)">&#128264;</button>
+            <button class="speak-btn" onclick="event.stopPropagation();speakSlow('${word.word.replace(/'/g,"\\'")}');" style="font-size:12px;margin-top:8px;color:var(--text3)">&#128034; Slow</button>
+            <div style="margin-top:12px;font-size:12px;color:var(--text3)">Tap card to reveal</div>
+          </div>
+          <div class="flashcard-face flashcard-back">
+            <div class="flashcard-category">${CATEGORIES[word.category]||word.category}</div>
+            <div class="flashcard-word">${word.word}</div>
+            ${word.phonetic ? `<div style="font-size:14px;color:var(--accent2);margin-top:2px">/${word.phonetic}/</div>` : ''}
+            <div class="flashcard-def" style="margin-top:8px">${formatMultiDef(word.definition)}</div>
+            <div class="flashcard-example">"${word.example}"</div>
+          </div>
+        </div>
+      </div>
+      ${flashcardState.flipped ? `<div class="btn-row mt">
+        <button class="btn btn-green" onclick="rateFlashcard(true)">Got it</button>
+        <button class="btn btn-red" onclick="rateFlashcard(false)">Still learning</button>
+      </div>` : '<div style="text-align:center;color:var(--text3);font-size:13px;margin-top:12px">Think of the word, then tap to check</div>'}
+      <div class="btn-row mt" style="gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="skipFlashcard()" style="font-size:12px">&#8594; Later</button>
+        <button class="btn btn-ghost btn-sm" onclick="markKnownFlashcard()" style="font-size:12px;color:var(--green)">&#10003; Know</button>
+      </div>`;
+    if(!flashcardState.flipped) setTimeout(()=>speak(word.word), 200);
+    else if(flashcardState.flipped) speak(word.definition);
+    return;
+  }
+
+  // Normal flashcard mode
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:8px">
       <span>${flashcardState.current+1} / ${flashcardState.words.length}</span>
@@ -1166,16 +1432,19 @@ function skipFlashcard(){
 }
 
 function endSessionEarly(mode){
-  if(mode === 'quiz' && quiz){
+  if(mode === 'quiz' && audioQuiz){
+    endAudioQuizEarly(); return;
+  } else if(mode === 'quiz' && quiz){
     clearInterval(timerInterval);
     quiz.words.length = quiz.current; // truncate to trigger summary
     renderQuizSummary(document.getElementById('screen-quiz'));
   } else if(mode === 'cards'){
+    const wasListening = flashcardState && flashcardState.listeningMode;
     flashcardState = null;
     const el = document.getElementById('screen-cards');
     el.innerHTML = `<div class="text-center" style="padding-top:40px">
       <h2>Session ended</h2><p class="subtitle" style="margin-bottom:16px">You can pick up where you left off anytime</p>
-      <button class="btn mt" onclick="startFlashcards()">Start Again</button>
+      <button class="btn mt" onclick="${wasListening?'startListeningFlashcards()':'startFlashcards()'}">Start Again</button>
       <button class="btn btn-ghost mt" onclick="goTo('home')">Home</button></div>`;
   } else if(mode === 'voice'){
     voiceState = null;
@@ -1410,8 +1679,138 @@ function renderWordList(el){
     <div class="filter-chips mb">
       ${cats.map(c => `<button class="chip ${wordFilter===c?'active':''}" onclick="wordFilter='${c}';renderWordList(document.getElementById('screen-words'))">${c==='all'?'All':(CATEGORIES[c]||c)}</button>`).join('')}
     </div>
+    <div id="word-autoplay-bar"></div>
     <div id="word-list-results"></div>`;
   updateWordListResults();
+}
+
+// ===== AUTO-PLAY WORD LIST =====
+let autoPlayState = null;
+let autoPlayTimer = null;
+
+function getFilteredWords(){
+  let filtered = WORDS;
+  if(wordFilter !== 'all') filtered = filtered.filter(w => w.category === wordFilter);
+  if(wordSearch) filtered = filtered.filter(w => w.word.toLowerCase().includes(wordSearch.toLowerCase()) || w.definition.toLowerCase().includes(wordSearch.toLowerCase()));
+  return filtered;
+}
+
+function startAutoPlay(){
+  const words = getFilteredWords();
+  if(!words.length){ toast('No words to play'); return; }
+  autoPlayState = { words, current:0, phase:'word', paused:false };
+  renderAutoPlayBar();
+  autoPlayNext();
+}
+
+function stopAutoPlay(){
+  if(autoPlayTimer) clearTimeout(autoPlayTimer);
+  autoPlayTimer = null;
+  autoPlayState = null;
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  renderAutoPlayBar();
+}
+
+function toggleAutoPlayPause(){
+  if(!autoPlayState) return;
+  autoPlayState.paused = !autoPlayState.paused;
+  if(autoPlayState.paused){
+    if(autoPlayTimer) clearTimeout(autoPlayTimer);
+    autoPlayTimer = null;
+    window.speechSynthesis && window.speechSynthesis.cancel();
+    if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  } else {
+    autoPlayNext();
+  }
+  renderAutoPlayBar();
+}
+
+function autoPlaySkip(dir){
+  if(!autoPlayState) return;
+  if(autoPlayTimer) clearTimeout(autoPlayTimer);
+  autoPlayTimer = null;
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  autoPlayState.current += dir;
+  if(autoPlayState.current < 0) autoPlayState.current = 0;
+  if(autoPlayState.current >= autoPlayState.words.length){ stopAutoPlay(); toast('Auto-play finished!'); return; }
+  autoPlayState.phase = 'word';
+  if(!autoPlayState.paused) autoPlayNext();
+  renderAutoPlayBar();
+}
+
+function autoPlayNext(){
+  if(!autoPlayState || autoPlayState.paused) return;
+  if(autoPlayState.current >= autoPlayState.words.length){ stopAutoPlay(); toast('Auto-play finished!'); return; }
+  const w = autoPlayState.words[autoPlayState.current];
+  renderAutoPlayBar();
+
+  if(autoPlayState.phase === 'word'){
+    speak(w.word);
+    autoPlayState.phase = 'pause1';
+    autoPlayTimer = setTimeout(()=>autoPlayNext(), getSpokenDuration(w.word) + 800);
+  } else if(autoPlayState.phase === 'pause1'){
+    autoPlayState.phase = 'definition';
+    autoPlayNext();
+  } else if(autoPlayState.phase === 'definition'){
+    speak(w.definition);
+    autoPlayState.phase = 'pause2';
+    autoPlayTimer = setTimeout(()=>autoPlayNext(), getSpokenDuration(w.definition) + 800);
+  } else if(autoPlayState.phase === 'pause2'){
+    autoPlayState.phase = 'example';
+    autoPlayNext();
+  } else if(autoPlayState.phase === 'example'){
+    if(w.example){
+      speak(w.example);
+      autoPlayState.phase = 'gap';
+      autoPlayTimer = setTimeout(()=>autoPlayNext(), getSpokenDuration(w.example) + 1200);
+    } else {
+      autoPlayState.phase = 'gap';
+      autoPlayTimer = setTimeout(()=>autoPlayNext(), 600);
+    }
+  } else if(autoPlayState.phase === 'gap'){
+    autoPlayState.current++;
+    autoPlayState.phase = 'word';
+    autoPlayNext();
+  }
+}
+
+function getSpokenDuration(text){
+  if(!text) return 500;
+  const words = text.split(/\s+/).length;
+  const rate = state.settings.voiceSpeed || 0.9;
+  return Math.max(600, (words / (2.5 * rate)) * 1000);
+}
+
+function renderAutoPlayBar(){
+  const bar = document.getElementById('word-autoplay-bar');
+  if(!bar) return;
+  if(!autoPlayState){
+    const wordCount = getFilteredWords().length;
+    bar.innerHTML = wordCount > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button class="btn btn-sm" onclick="startAutoPlay()" style="background:linear-gradient(135deg,var(--accent),#a29bfe);white-space:nowrap">&#9654; Auto-Play All (${wordCount})</button>
+      <span style="font-size:11px;color:var(--text3)">Listen to words like a podcast</span>
+    </div>` : '';
+    return;
+  }
+  const w = autoPlayState.current < autoPlayState.words.length ? autoPlayState.words[autoPlayState.current] : null;
+  const pct = autoPlayState.words.length > 0 ? ((autoPlayState.current / autoPlayState.words.length) * 100).toFixed(0) : 0;
+  bar.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--accent);border-radius:var(--radius);padding:10px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-size:12px;color:var(--accent2)">&#127911; Auto-Playing ${autoPlayState.current+1}/${autoPlayState.words.length}</span>
+      <span style="font-size:11px;color:var(--text3)">${pct}%</span>
+    </div>
+    <div class="progress-bar" style="margin-bottom:8px"><div class="progress-fill" style="width:${pct}%"></div></div>
+    ${w ? `<div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:2px">${w.word}</div>
+    <div style="font-size:12px;color:var(--text2)">${w.definition}</div>` : ''}
+    <div style="display:flex;gap:8px;margin-top:8px;justify-content:center">
+      <button class="btn btn-sm btn-ghost" onclick="autoPlaySkip(-1)" style="width:36px;height:36px;padding:0">&#9664;</button>
+      <button class="btn btn-sm" onclick="toggleAutoPlayPause()" style="width:48px;height:36px;padding:0">${autoPlayState.paused?'&#9654;':'&#10074;&#10074;'}</button>
+      <button class="btn btn-sm btn-ghost" onclick="autoPlaySkip(1)" style="width:36px;height:36px;padding:0">&#9654;</button>
+      <button class="btn btn-sm btn-ghost" onclick="stopAutoPlay()" style="width:36px;height:36px;padding:0;color:var(--red)">&#9632;</button>
+    </div>
+  </div>`;
 }
 
 function updateWordListResults(){
