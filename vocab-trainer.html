@@ -531,6 +531,29 @@ function getDistractors(word, count=3){
   return result;
 }
 
+// ===== CLEAN DEFINITION (strip word from AI-generated definitions) =====
+function cleanDefinition(word, def){
+  if(!def || !word) return def || '';
+  const w = word.trim();
+  const wLower = w.toLowerCase();
+  let d = def.trim();
+  // Patterns: "Word is ...", "Word: ...", "A word is ...", "Word means ...", "Word — ...", "Word refers to ..."
+  const patterns = [
+    new RegExp('^(?:a |an |the )?'+escapeRegex(w)+'\\s*(?:is |are |was |means |refers to |—|–|:|-)\\s*','i'),
+    new RegExp('^(?:a |an |the )?'+escapeRegex(w)+'\\s*[,:]\\s*','i'),
+    new RegExp('^"'+escapeRegex(w)+'"\\s*(?:is |are |means |refers to |—|–|:|-)\\s*','i'),
+  ];
+  for(const p of patterns){
+    const cleaned = d.replace(p, '');
+    if(cleaned !== d && cleaned.length > 5){
+      d = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+      break;
+    }
+  }
+  return d;
+}
+function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 // ===== TTS =====
 function sanitizeTTS(text){
   if(!text) return '';
@@ -2581,9 +2604,10 @@ function normalizeWordObj(obj){
   // Handle example as array
   const exStr = Array.isArray(example) ? example[0] || '' : String(example);
 
+  const wordStr = String(word).trim();
   return {
-    word: String(word).trim(),
-    definition: String(definition).trim(),
+    word: wordStr,
+    definition: cleanDefinition(wordStr, String(definition).trim()),
     example: exStr.trim(),
     category: mapCategory(String(category).toLowerCase().trim()),
     difficulty: typeof difficulty === 'number' ? Math.min(3,Math.max(1,difficulty)) : 2,
@@ -4040,7 +4064,7 @@ Reply in EXACTLY this JSON format, no extra text:
     try{
       const cleaned = result.replace(/```json?\n?/g,'').replace(/```/g,'').trim();
       const data = JSON.parse(cleaned);
-      if(data.definition) document.getElementById('add-def').value = data.definition;
+      if(data.definition) document.getElementById('add-def').value = cleanDefinition(document.getElementById('add-word').value, data.definition);
       if(data.example) document.getElementById('add-example').value = data.example;
       if(data.category && CATEGORIES[data.category]){
         document.getElementById('add-cat').value = data.category;
@@ -4956,7 +4980,7 @@ function addSuggestedWord(idx){
   const exists = WORDS.find(x => x.word.toLowerCase() === w.word.toLowerCase());
   if(exists){ toast('"'+w.word+'" already in library'); return; }
   state.customWords.push({
-    word:w.word, definition:w.definition||'', example:w.example||'',
+    word:w.word, definition:cleanDefinition(w.word, w.definition||''), example:w.example||'',
     category:w.category&&CATEGORIES[w.category]?w.category:'custom', difficulty:2
   });
   saveState(); rebuildWords();
@@ -4972,7 +4996,7 @@ function addAllSuggestedWords(){
     const exists = WORDS.find(x => x.word.toLowerCase() === w.word.toLowerCase());
     if(exists) return;
     state.customWords.push({
-      word:w.word, definition:w.definition||'', example:w.example||'',
+      word:w.word, definition:cleanDefinition(w.word, w.definition||''), example:w.example||'',
       category:w.category&&CATEGORIES[w.category]?w.category:'custom', difficulty:2
     });
     added++;
@@ -5022,6 +5046,7 @@ Category: ${CATEGORIES[w.category] || w.category}
 
 Requirements:
 - Write a NEW, DIFFERENT definition that explains the same meaning from a different angle
+- Do NOT start the definition with the word itself (e.g. don't write "Potluck is..." — just write the meaning directly)
 - Use simpler or more vivid language than the current definition
 - Write a NEW example sentence that is completely different from the current one
 - The example should be natural and relevant to daily life in Canada
@@ -5045,8 +5070,9 @@ Reply in EXACTLY this JSON format, no extra text:
 
     // Update customWords
     const cw = state.customWords.find(c => c.word.toLowerCase() === w.word.toLowerCase());
+    const cleanDef = cleanDefinition(w.word, data.definition);
     if(cw){
-      cw.definition = data.definition;
+      cw.definition = cleanDef;
       if(data.example) cw.example = data.example;
       saveState();
       rebuildWords();
@@ -5055,7 +5081,7 @@ Reply in EXACTLY this JSON format, no extra text:
     if(explainEl) explainEl.innerHTML = `<div class="card card-sm" style="background:var(--bg3)">
       <div style="font-size:11px;color:var(--green);font-weight:700;margin-bottom:6px">&#10003; Definition rephrased!</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:2px">Old: <s>${oldDef}</s></div>
-      <div style="font-size:13px;color:var(--text);margin-bottom:6px">New: ${data.definition}</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:6px">New: ${cleanDef}</div>
       ${data.example ? `<div style="font-size:12px;color:var(--text3);margin-bottom:2px">Old example: <s>${oldExample||'none'}</s></div>
       <div style="font-size:13px;color:var(--text);font-style:italic">"${data.example}"</div>` : ''}
       <div style="display:flex;gap:6px;margin-top:8px">
@@ -5109,6 +5135,7 @@ Reply in EXACTLY this JSON format, no extra text:
 
 Requirements:
 - Each new definition must be DIFFERENT from the current one (different wording, different angle)
+- Do NOT start definitions with the word itself (e.g. don't write "Potluck is..." — just write the meaning)
 - Each new example must be a COMPLETELY DIFFERENT sentence
 - Keep definitions concise (1-2 sentences)
 - Examples should be natural Canadian English`;
@@ -5126,7 +5153,7 @@ Requirements:
       if(!item.word || !item.definition) continue;
       const cw = state.customWords.find(c => c.word.toLowerCase() === item.word.toLowerCase());
       if(cw){
-        cw.definition = item.definition;
+        cw.definition = cleanDefinition(item.word, item.definition);
         if(item.example) cw.example = item.example;
         updated++;
       }
