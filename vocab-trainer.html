@@ -535,13 +535,16 @@ function getDistractors(word, count=3){
 function cleanDefinition(word, def){
   if(!def || !word) return def || '';
   const w = word.trim();
-  const wLower = w.toLowerCase();
+  const esc = escapeRegex(w);
   let d = def.trim();
-  // Patterns: "Word is ...", "Word: ...", "A word is ...", "Word means ...", "Word — ...", "Word refers to ..."
+  // Match the word optionally wrapped in quotes/apostrophes, with optional article
+  // e.g. "Prior means ...", "'Prior' means ...", "A potluck is ...", ""word" is ..."
+  const wordPat = `(?:a |an |the )?(?:['"\u2018\u2019\u201C\u201D])?${esc}(?:['"\u2018\u2019\u201C\u201D])?`;
+  const verbPat = '(?:is |are |was |were |means |refers to |describes |denotes |indicates )';
   const patterns = [
-    new RegExp('^(?:a |an |the )?'+escapeRegex(w)+'\\s*(?:is |are |was |means |refers to |—|–|:|-)\\s*','i'),
-    new RegExp('^(?:a |an |the )?'+escapeRegex(w)+'\\s*[,:]\\s*','i'),
-    new RegExp('^"'+escapeRegex(w)+'"\\s*(?:is |are |means |refers to |—|–|:|-)\\s*','i'),
+    new RegExp(`^${wordPat}\\s*${verbPat}\\s*`,'i'),
+    new RegExp(`^${wordPat}\\s*(?:—|–|:|-)\\s*`,'i'),
+    new RegExp(`^${wordPat}\\s*[,:]\\s*`,'i'),
   ];
   for(const p of patterns){
     const cleaned = d.replace(p, '');
@@ -4291,8 +4294,13 @@ async function callGemini(messages, systemInstruction){
       toast('AI returned no content: '+reason);
       return null;
     }
-    return text;
+    return cleanGeminiText(text);
   }catch(e){ console.error('Gemini network error:', e); toast('Network error: '+e.message); return null; }
+}
+
+function cleanGeminiText(text){
+  if(!text) return text;
+  return text.replace(/^```(?:json)?\s*/gi,'').replace(/\s*```$/g,'').replace(/^json\s*\n/i,'').trim();
 }
 
 async function callGeminiWithAudio(audioBase64, mimeType, textPrompt, systemInstruction){
