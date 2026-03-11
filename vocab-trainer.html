@@ -557,6 +557,18 @@ function cleanDefinition(word, def){
 }
 function escapeRegex(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// Build a word pool string for AI prompts (prefer learning/familiar words)
+function getVocabPoolForPrompt(excludeWord, maxCount){
+  maxCount = maxCount || 60;
+  const exclude = (excludeWord||'').toLowerCase();
+  const ranked = WORDS.filter(w => w.word.toLowerCase() !== exclude).map(w => {
+    const s = getWordStatus(w.id);
+    const rank = s==='learning'?0 : s==='beginner'?1 : s==='familiar'?2 : s==='new'?3 : 4;
+    return {word:w.word, rank};
+  }).sort((a,b)=>a.rank-b.rank);
+  return ranked.slice(0,maxCount).map(w=>w.word).join(', ');
+}
+
 // ===== TTS =====
 function sanitizeTTS(text){
   if(!text) return '';
@@ -4053,16 +4065,20 @@ async function aiAutoFill(){
   if(!word){ toast('Type a word first'); return; }
   toast('Asking AI...');
   const validCats = Object.keys(CATEGORIES).filter(k=>k!=='custom').join(', ');
+  const vocabPool = getVocabPoolForPrompt(word);
   const prompt = `For the English word/phrase "${word}" used in Canadian daily life, provide:
-1. A clear, simple definition (1 sentence, for ESL learners)
+1. A clear, simple definition (1 sentence, for ESL learners). Do NOT start with the word itself.
 2. An example sentence using it in a Canadian context
 3. The best category from this list: ${validCats}
 4. Difficulty level: 1 (easy/common), 2 (medium), or 3 (hard/specialized)
 5. Grammar info: part of speech (e.g. "n", "v", "adj", "adv", "n/v"), related forms (e.g. "efficiency (n), efficiently (adv)"), and a short usage tip to prevent common ESL mistakes
 
+The learner is also studying these words: ${vocabPool}
+When natural, use some of these words in the definition or example sentence for reinforcement.
+
 Reply in EXACTLY this JSON format, no extra text:
 {"definition":"...","example":"...","category":"...","difficulty":1,"grammar":{"pos":"...","related":"...","usage":"..."}}`;
-  const result = await callGemini([{role:'user',text:prompt}],'You are a dictionary. Respond only with valid JSON. Keep definitions simple for ESL learners.');
+  const result = await callGemini([{role:'user',text:prompt}],'You are a dictionary. Respond only with valid JSON. Keep definitions simple for ESL learners. When possible, use the learner\'s other vocabulary words in definitions and examples.');
   if(result){
     try{
       const cleaned = result.replace(/```json?\n?/g,'').replace(/```/g,'').trim();
@@ -5046,16 +5062,21 @@ async function aiRephraseWord(wordId){
   const explainEl = document.getElementById('ai-explain-content');
   if(explainEl) explainEl.innerHTML = '<div class="ai-loading"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--text3);margin-top:4px">AI is rephrasing...</div>';
 
+  const vocabPool = getVocabPoolForPrompt(w.word);
   const prompt = `Rephrase the definition and example sentence for the English word/phrase "${w.word}".
 
 Current definition: ${w.definition}
 Current example: ${w.example || 'none'}
 Category: ${CATEGORIES[w.category] || w.category}
 
+The learner is also studying these words: ${vocabPool}
+Try to USE some of these words naturally in the definition or example sentence, so the learner gets extra exposure to them.
+
 Requirements:
 - Write a NEW, DIFFERENT definition that explains the same meaning from a different angle
 - Do NOT start the definition with the word itself (e.g. don't write "Potluck is..." — just write the meaning directly)
 - Use simpler or more vivid language than the current definition
+- Prefer using the learner's other vocabulary words in the definition and example when it fits naturally
 - Write a NEW example sentence that is completely different from the current one
 - The example should be natural and relevant to daily life in Canada
 - Keep the definition concise (1-2 sentences max)
@@ -5063,7 +5084,7 @@ Requirements:
 Reply in EXACTLY this JSON format, no extra text:
 {"definition":"new definition here","example":"new example sentence here"}`;
 
-  const result = await callGemini([{role:'user',text:prompt}],'You are an ESL vocabulary teacher. Rephrase definitions to help learners see the word from a fresh perspective. Reply only with valid JSON.');
+  const result = await callGemini([{role:'user',text:prompt}],'You are an ESL vocabulary teacher. Rephrase definitions to help learners see the word from a fresh perspective. When possible, use the learner\'s other vocabulary words in definitions and examples for reinforcement. Reply only with valid JSON.');
   if(!result){
     if(explainEl) explainEl.innerHTML = '<div style="color:var(--red);font-size:13px">Could not rephrase. Check your API key.</div>';
     return;
@@ -5133,10 +5154,15 @@ async function batchRephraseWords(){
 
   if(statusEl) statusEl.innerHTML = `<div style="font-size:12px;color:var(--accent2);margin-top:6px">Rephrasing ${count} words...</div>`;
 
+  const batchNames = new Set(batch.map(w=>w.word.toLowerCase()));
+  const vocabPool = WORDS.filter(w => !batchNames.has(w.word.toLowerCase())).map(w=>w.word).slice(0,60).join(', ');
   const wordList = batch.map(w => `- "${w.word}": current definition: "${w.definition}", current example: "${w.example||'none'}"`).join('\n');
   const prompt = `Rephrase the definitions and example sentences for these English vocabulary words. Use different angles, simpler or more vivid language, and completely new examples relevant to daily life in Canada.
 
 ${wordList}
+
+The learner is also studying these words: ${vocabPool}
+Try to USE some of these words naturally in the definitions and examples, so the learner gets extra exposure.
 
 Reply in EXACTLY this JSON format, no extra text:
 [{"word":"...","definition":"new definition","example":"new example sentence"},...]
@@ -5144,11 +5170,12 @@ Reply in EXACTLY this JSON format, no extra text:
 Requirements:
 - Each new definition must be DIFFERENT from the current one (different wording, different angle)
 - Do NOT start definitions with the word itself (e.g. don't write "Potluck is..." — just write the meaning)
+- Prefer using the learner's other vocabulary words in definitions and examples when natural
 - Each new example must be a COMPLETELY DIFFERENT sentence
 - Keep definitions concise (1-2 sentences)
 - Examples should be natural Canadian English`;
 
-  const result = await callGemini([{role:'user',text:prompt}],'You are an ESL vocabulary teacher. Rephrase definitions to help learners see words from fresh perspectives. Reply only with valid JSON array.');
+  const result = await callGemini([{role:'user',text:prompt}],'You are an ESL vocabulary teacher. Rephrase definitions to help learners see words from fresh perspectives. When possible, use the learner\'s other vocabulary words for reinforcement. Reply only with valid JSON array.');
   if(!result){
     if(statusEl) statusEl.innerHTML = '<div style="color:var(--red);font-size:12px;margin-top:6px">Failed. Check API key.</div>';
     return;
