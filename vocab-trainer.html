@@ -4001,6 +4001,7 @@ function renderAddManual(el){
         </div>
       </div>
       ${state.settings.apiKey ? `<button class="btn btn-ghost btn-sm mb" onclick="aiAutoFill()">&#10022; AI Auto-fill All Fields (type word first)</button>` : ''}
+      <div id="meanings-list"></div>
       <div id="grammar-preview"></div>
       <button class="btn" onclick="addCustomWord()">Add Word</button>
     </div>`;
@@ -4022,6 +4023,7 @@ function addCustomWord(){
   if(pendingGrammar) newWord.grammar = pendingGrammar;
   state.customWords.push(newWord);
   pendingGrammar = null;
+  pendingMeanings = [];
   saveState();
   rebuildWords();
   toast('"'+word+'" added!');
@@ -4097,6 +4099,7 @@ function forceAddWord(action){
     toast('"'+newWord.word+'" added as second entry!');
   }
   pendingGrammar = null;
+  pendingMeanings = [];
   closeModal();
   saveState();
   rebuildWords();
@@ -4105,6 +4108,49 @@ function forceAddWord(action){
 
 let pendingGrammar = null;
 
+let pendingMeanings = [];
+
+function syncMeaningsToFields(){
+  const defField = document.getElementById('add-def');
+  const exField = document.getElementById('add-example');
+  if(!defField) return;
+  if(pendingMeanings.length === 0){
+    defField.value = '';
+    if(exField) exField.value = '';
+  } else if(pendingMeanings.length === 1){
+    defField.value = pendingMeanings[0].definition;
+    if(exField) exField.value = pendingMeanings[0].example;
+  } else {
+    defField.value = pendingMeanings.map((m,i)=>`${i+1}. ${m.definition}`).join('; ');
+    if(exField) exField.value = pendingMeanings.map(m=>m.example).join(' / ');
+  }
+}
+
+function renderMeaningsList(){
+  const container = document.getElementById('meanings-list');
+  if(!container) return;
+  if(pendingMeanings.length <= 1){ container.innerHTML = ''; return; }
+  container.innerHTML = `
+    <div class="card card-sm" style="background:var(--bg3);margin-top:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--accent2);margin-bottom:6px">Multiple Meanings (${pendingMeanings.length})</div>
+      ${pendingMeanings.map((m,i)=>`
+        <div style="display:flex;align-items:flex-start;gap:6px;padding:6px 0;${i>0?'border-top:1px solid var(--border)':''}">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;color:var(--text1)"><strong>${i+1}.</strong> ${m.definition}</div>
+            <div style="font-size:11px;color:var(--text3);font-style:italic;margin-top:2px">"${m.example}"</div>
+          </div>
+          <button onclick="removeMeaning(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;padding:2px 4px" title="Remove this meaning">&times;</button>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+function removeMeaning(idx){
+  pendingMeanings.splice(idx,1);
+  syncMeaningsToFields();
+  renderMeaningsList();
+}
+
 async function aiAutoFill(){
   const wordInput = document.getElementById('add-word');
   const word = wordInput?.value.trim();
@@ -4112,25 +4158,42 @@ async function aiAutoFill(){
   toast('Asking AI...');
   const validCats = Object.keys(CATEGORIES).filter(k=>k!=='custom').join(', ');
   const vocabPool = getVocabPoolForPrompt(word);
-  const prompt = `For the English word/phrase "${word}" used in Canadian daily life, provide:
-1. A clear, simple definition (1 sentence, for ESL learners). Do NOT start with the word itself.
-2. An example sentence using it in a Canadian context
-3. The best category from this list: ${validCats}
-4. Difficulty level: 1 (easy/common), 2 (medium), or 3 (hard/specialized)
-5. Grammar info: part of speech (e.g. "n", "v", "adj", "adv", "n/v"), related forms (e.g. "efficiency (n), efficiently (adv)"), and a short usage tip to prevent common ESL mistakes
+  const prompt = `For the English word/phrase "${word}" used in Canadian daily life, provide ALL common meanings/senses of this word.
+
+For EACH meaning, provide:
+- A clear, simple definition (1 sentence, for ESL learners). Do NOT start with the word itself.
+- An example sentence using it in a Canadian context
+
+Also provide:
+- The best category from this list: ${validCats}
+- Difficulty level: 1 (easy/common), 2 (medium), or 3 (hard/specialized)
+- Grammar info: part of speech (e.g. "n", "v", "adj", "adv", "n/v"), related forms, and a usage tip
 
 The learner is also studying these words: ${vocabPool}
-When natural, use some of these words in the definition or example sentence for reinforcement.
+When natural, use some of these words in definitions or examples for reinforcement.
 
 Reply in EXACTLY this JSON format, no extra text:
-{"definition":"...","example":"...","category":"...","difficulty":1,"grammar":{"pos":"...","related":"...","usage":"..."}}`;
+{"meanings":[{"definition":"...","example":"..."}],"category":"...","difficulty":1,"grammar":{"pos":"...","related":"...","usage":"..."}}
+
+If the word has only ONE meaning, still use the meanings array with one item.`;
   const result = await callGemini([{role:'user',text:prompt}],'You are a dictionary. Respond only with valid JSON. Keep definitions simple for ESL learners. When possible, use the learner\'s other vocabulary words in definitions and examples.');
   if(result){
     try{
       const cleaned = result.replace(/```json?\n?/g,'').replace(/```/g,'').trim();
       const data = JSON.parse(cleaned);
-      if(data.definition) document.getElementById('add-def').value = cleanDefinition(document.getElementById('add-word').value, data.definition);
-      if(data.example) document.getElementById('add-example').value = data.example;
+      const wordName = document.getElementById('add-word')?.value.trim() || word;
+      if(data.meanings && Array.isArray(data.meanings) && data.meanings.length > 0){
+        pendingMeanings = data.meanings.map(m=>({
+          definition: cleanDefinition(wordName, m.definition || ''),
+          example: m.example || ''
+        })).filter(m=>m.definition);
+      } else if(data.definition){
+        pendingMeanings = [{definition: cleanDefinition(wordName, data.definition), example: data.example || ''}];
+      }
+      if(pendingMeanings.length > 0){
+        syncMeaningsToFields();
+        renderMeaningsList();
+      }
       if(data.category && CATEGORIES[data.category]){
         document.getElementById('add-cat').value = data.category;
       }
@@ -4146,7 +4209,7 @@ Reply in EXACTLY this JSON format, no extra text:
           ${pendingGrammar.usage?'<div style="font-size:11px;color:var(--orange);margin-top:3px">&#9888; '+pendingGrammar.usage+'</div>':''}
         </div>`;
       }
-      toast('AI filled all fields!');
+      toast(`AI filled ${pendingMeanings.length} meaning${pendingMeanings.length>1?'s':''}!`);
     }catch(e){ toast('AI response format error, try again'); console.error(result); }
   }
 }
