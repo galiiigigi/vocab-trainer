@@ -391,6 +391,7 @@ if(!state.settings.notifications) state.settings.notifications = {enabled:false,
 if(state.settings.autoPlayAudio === undefined) state.settings.autoPlayAudio = true;
 if(!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.0-flash';
 if(!state._lastNotifTimes) state._lastNotifTimes = {};
+if(!state.rtHistory) state.rtHistory = [];
 
 function getGeminiModel(){ return state.settings.geminiModel || 'gemini-2.0-flash'; }
 function getGeminiUrl(key){ return `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(key)}`; }
@@ -426,12 +427,50 @@ function getWordStatus(wordId){
   return 'beginner';
 }
 
-function rtToQuality(rt, correct){
+// Reading speed by CEFR level (seconds per word)
+function getReadingSpeed(){
+  const vocab = (state.customWords||[]).length;
+  if(vocab >= 3500) return 0.2;  // B2+
+  if(vocab >= 2500) return 0.25; // B1-B2
+  if(vocab >= 1500) return 0.3;  // A2-B1
+  return 0.4;                     // A1-A2
+}
+
+// Estimate reading time for displayed text (question + choices)
+function estimateReadingTime(textParts){
+  const totalWords = textParts.filter(Boolean).join(' ').split(/\s+/).length;
+  return totalWords * getReadingSpeed();
+}
+
+// Get adaptive thresholds from history, or defaults
+function getAdaptiveThresholds(){
+  const hist = state.rtHistory || [];
+  if(hist.length < 30) return [3, 6, 12]; // generous defaults for new users
+  const sorted = [...hist].sort((a,b)=>a-b);
+  const p25 = sorted[Math.floor(sorted.length * 0.25)];
+  const p50 = sorted[Math.floor(sorted.length * 0.50)];
+  const p75 = sorted[Math.floor(sorted.length * 0.75)];
+  return [Math.max(1, p25), Math.max(2, p50), Math.max(3, p75)];
+}
+
+// Record thinking time for adaptive calibration
+function recordThinkingTime(thinkTime){
+  if(!state.rtHistory) state.rtHistory = [];
+  state.rtHistory.push(Math.round(thinkTime * 100) / 100);
+  // Keep last 200 entries
+  if(state.rtHistory.length > 200) state.rtHistory = state.rtHistory.slice(-200);
+}
+
+function rtToQuality(rt, correct, textParts){
   if(!correct) return 0;
-  const [t1,t2,t3] = state.settings.rtThresholds;
-  if(rt < t1) return 5;
-  if(rt < t2) return 4;
-  if(rt < t3) return 3;
+  const readTime = textParts ? estimateReadingTime(textParts) : 0;
+  const thinkTime = Math.max(0, rt - readTime);
+  // Record for adaptive calibration (only correct answers)
+  recordThinkingTime(thinkTime);
+  const [t1,t2,t3] = getAdaptiveThresholds();
+  if(thinkTime < t1) return 5;
+  if(thinkTime < t2) return 4;
+  if(thinkTime < t3) return 3;
   return 2;
 }
 
@@ -984,8 +1023,10 @@ function answerQuiz(choiceIdx){
   const rt = (performance.now() - quiz.startTime) / 1000;
   const choice = quiz.choices[choiceIdx];
   const correct = choice.correct;
-  const quality = rtToQuality(rt, correct);
   const word = quiz.currentWord;
+  // Pass question + all choice texts for reading time estimation
+  const textParts = [quiz.showWord ? word.word : word.definition, ...quiz.choices.map(c=>c.text)];
+  const quality = rtToQuality(rt, correct, textParts);
 
   // Update SRS
   updateSRS(word.id, quality, rt);
@@ -1205,8 +1246,10 @@ function answerAudioQuiz(choiceIdx){
   const rt = (performance.now() - audioQuiz.startTime) / 1000;
   const choice = audioQuiz.choices[choiceIdx];
   const correct = choice.correct;
-  const quality = rtToQuality(rt, correct);
   const word = audioQuiz.currentWord;
+  // Audio quiz: question is heard, only choices need reading
+  const textParts = audioQuiz.choices.map(c=>c.text);
+  const quality = rtToQuality(rt, correct, textParts);
   updateSRS(word.id, quality, rt);
   recordActivity(correct);
   state.totalAnswered++;
@@ -2398,15 +2441,13 @@ function renderSettings(el){
       ` : ''}
     </div>
     <div class="card mt">
-      <h3>RT Speed Thresholds (seconds)</h3>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Perfect < T1 < Good < T2 < Hard < T3 < Fail</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <label style="font-size:12px">T1:</label>
-        <input type="number" step="0.5" min="0.5" max="5" value="${s.rtThresholds[0]}" style="width:60px;background:var(--bg3);color:var(--text);border:1px solid var(--bg4);border-radius:6px;padding:6px;font-size:14px" onchange="state.settings.rtThresholds[0]=+this.value;saveState()">
-        <label style="font-size:12px">T2:</label>
-        <input type="number" step="0.5" min="1" max="8" value="${s.rtThresholds[1]}" style="width:60px;background:var(--bg3);color:var(--text);border:1px solid var(--bg4);border-radius:6px;padding:6px;font-size:14px" onchange="state.settings.rtThresholds[1]=+this.value;saveState()">
-        <label style="font-size:12px">T3:</label>
-        <input type="number" step="0.5" min="2" max="15" value="${s.rtThresholds[2]}" style="width:60px;background:var(--bg3);color:var(--text);border:1px solid var(--bg4);border-radius:6px;padding:6px;font-size:14px" onchange="state.settings.rtThresholds[2]=+this.value;saveState()">
+      <h3>RT Speed Thresholds</h3>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Adaptive — automatically adjusts based on your performance. Reading time is deducted from response time so longer questions are fair.</div>
+      <div style="font-size:12px;color:var(--text2)">
+        ${state.rtHistory && state.rtHistory.length >= 30 ? (() => {
+          const t = getAdaptiveThresholds();
+          return 'Current thresholds: <span style="color:var(--green)">Fast &lt;' + t[0].toFixed(1) + 's</span> · <span style="color:var(--blue)">Good &lt;' + t[1].toFixed(1) + 's</span> · <span style="color:var(--orange)">Slow &lt;' + t[2].toFixed(1) + 's</span><br><span style="font-size:11px;color:var(--text3)">Based on your last ' + Math.min(200, state.rtHistory.length) + ' answers</span>';
+        })() : 'Calibrating... (' + (state.rtHistory||[]).length + '/30 answers collected)<br><span style="font-size:11px;color:var(--text3)">Using generous defaults until calibrated</span>'}
       </div>
     </div>
     <div class="card mt">
