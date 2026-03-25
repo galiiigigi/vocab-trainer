@@ -193,6 +193,25 @@ h3{font-size:16px;font-weight:600;margin-bottom:8px}
   .modal{border-radius:16px;align-self:center;max-height:70vh}
 }
 
+/* Desktop Mode */
+[data-layout="desktop"] .app{max-width:960px}
+[data-layout="desktop"] .screen{padding:24px 32px calc(var(--nav-h) + 24px)}
+[data-layout="desktop"] .nav-inner{max-width:960px}
+[data-layout="desktop"] .card{padding:20px}
+[data-layout="desktop"] .btn{min-height:44px}
+[data-layout="desktop"] .quiz-question{font-size:22px}
+[data-layout="desktop"] .quiz-choice{padding:14px 18px;font-size:15px}
+[data-layout="desktop"] .stat-grid{grid-template-columns:1fr 1fr 1fr}
+[data-layout="desktop"] .skill-grid{grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+[data-layout="desktop"] .home-actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+[data-layout="desktop"] .home-actions .btn{font-size:13px;min-height:44px}
+[data-layout="desktop"] .level-badge{width:64px;height:64px;font-size:24px;border-radius:16px}
+[data-layout="desktop"] .level-title{font-size:18px}
+[data-layout="desktop"] .flashcard-word{font-size:32px}
+[data-layout="desktop"] .word-item{padding:14px 16px}
+[data-layout="desktop"] h2{font-size:24px}
+[data-layout="desktop"] .modal{max-width:600px}
+
 /* TTS */
 .speak-btn{background:none;border:none;color:var(--accent2);font-size:20px;cursor:pointer;padding:2px 6px;vertical-align:middle;transition:opacity .15s}
 .speak-btn:active{opacity:.5}
@@ -409,12 +428,21 @@ if(!state._lastNotifTimes) state._lastNotifTimes = {};
 if(!state.rtHistory) state.rtHistory = [];
 if(!state.xp) state.xp = { total:0, wordXP:{}, dailyXP:{} };
 if(!state.settings.targetLevel) state.settings.targetLevel = 'B2';
+if(!state.settings.layout) state.settings.layout = 'mobile';
 
 function getGeminiModel(){ return state.settings.geminiModel || 'gemini-2.0-flash'; }
 function getGeminiUrl(key){ return `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(key)}`; }
 
 function applyTheme(){
   document.documentElement.dataset.theme = state.settings.theme === 'light' ? 'light' : '';
+}
+function applyLayout(){
+  document.documentElement.dataset.layout = state.settings.layout === 'desktop' ? 'desktop' : '';
+}
+function toggleLayout(){
+  state.settings.layout = state.settings.layout === 'desktop' ? 'mobile' : 'desktop';
+  saveState();
+  applyLayout();
 }
 
 let currentScreen = 'home';
@@ -1056,26 +1084,25 @@ function renderHome(el){
       <button class="btn btn-sm mb" onclick="goTo('pretest')">&#128218; Take Vocabulary Assessment</button>
       <button class="btn btn-ghost btn-sm" onclick="goTo('words')">Import Word Pack</button>
     </div>` : `${due > 0 ? `<button class="btn mb" onclick="startQuiz()" style="position:relative">${due} words due &mdash; Start Review</button>` : ''}`}
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn" style="flex:2;background:linear-gradient(135deg,var(--accent),#a29bfe)" onclick="startFreeChat()">&#128172; Free Chat</button>
-      <button class="btn btn-ghost" style="flex:1" onclick="goTo('chat')">&#10022; Scenarios</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--orange);color:var(--orange)" onclick="startChat('softener')">&#128172; Softener</button>
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--blue);color:var(--blue)" onclick="startChat('star')">&#127775; STAR</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--accent2);color:var(--accent2)" onclick="startAudioQuiz()">&#127911; Audio Quiz</button>
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--accent2);color:var(--accent2)" onclick="startListeningFlashcards()">&#127911; Listen Cards</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-ghost" style="flex:1" onclick="startVoice()">&#127908; Voice Test</button>
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--green);color:var(--green)" onclick="goTo('ear')">&#127911; Ear Training</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--accent);color:var(--accent)" onclick="startSubDrill()">&#128260; Substitution Drill</button>
-      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--blue);color:var(--blue)" onclick="startListenRespond()">&#127908; Listen & Respond</button>
+    <div class="home-actions">
+      <button class="btn" style="background:linear-gradient(135deg,var(--accent),#a29bfe)" onclick="startFreeChat()">&#128172; Free Chat</button>
+      <button class="btn btn-ghost" onclick="goTo('chat')">&#10022; Scenarios</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="startChat('softener')">&#128172; Softener</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--blue);color:var(--blue)" onclick="startChat('star')">&#127775; STAR</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--accent2);color:var(--accent2)" onclick="startAudioQuiz()">&#127911; Audio Quiz</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--accent2);color:var(--accent2)" onclick="startListeningFlashcards()">&#127911; Listen Cards</button>
+      <button class="btn btn-ghost" onclick="startVoice()">&#127908; Voice Test</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--green);color:var(--green)" onclick="goTo('ear')">&#127911; Ear Training</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--accent);color:var(--accent)" onclick="startSubDrill()">&#128260; Sub Drill</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--blue);color:var(--blue)" onclick="startListenRespond()">&#127908; Listen & Respond</button>
     </div>`;
+
+  // Mobile fallback: home-actions uses flex-wrap in mobile mode
+  if(state.settings.layout !== 'desktop'){
+    const actions = el.querySelector('.home-actions');
+    if(actions) actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';
+    actions?.querySelectorAll('.btn').forEach(b => b.style.flex = '1 1 45%');
+  }
 }
 
 // ===== QUIZ =====
@@ -2494,12 +2521,18 @@ function renderSettings(el){
     <h2>Settings</h2>
     <button class="btn btn-ghost mb" style="border:1px solid var(--accent);color:var(--accent2)" onclick="showUsageGuide()">&#128214; Usage Guide &amp; Tips</button>
     <div class="card mb">
-      <div class="setting-row" style="border:none">
+      <div class="setting-row">
         <span class="setting-label">Theme</span>
         <select onchange="state.settings.theme=this.value;saveState();applyTheme();renderSettings(document.getElementById('screen-settings'))">
           <option value="dark" ${s.theme==='dark'?'selected':''}>Dark</option>
           <option value="light" ${s.theme==='light'?'selected':''}>Light</option>
         </select>
+      </div>
+      <div class="setting-row" style="border:none">
+        <span class="setting-label">Layout</span>
+        <button class="btn btn-sm btn-ghost" style="width:auto;min-width:100px;padding:6px 14px" onclick="toggleLayout();renderSettings(document.getElementById('screen-settings'))">
+          ${s.layout==='desktop' ? '&#128187; Desktop' : '&#128241; Mobile'}
+        </button>
       </div>
     </div>
     <div class="card mb">
@@ -6110,6 +6143,7 @@ function checkNotificationTime(){
 window.addEventListener('DOMContentLoaded', () => {
   rebuildWords();
   applyTheme();
+  applyLayout();
   goTo('home');
   // Register Service Worker
   if('serviceWorker' in navigator){
