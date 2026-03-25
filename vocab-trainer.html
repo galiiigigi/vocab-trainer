@@ -3320,6 +3320,8 @@ async function loadGist(gistId, fileName){
     if(data.tq !== undefined){ state.totalQuizzes = data.tq; imported.push('stats'); }
     if(data.tc !== undefined) state.totalCorrect = data.tc;
     if(data.ta !== undefined) state.totalAnswered = data.ta;
+    if(data.xp) state.xp = data.xp;
+    if(data.rth) state.rtHistory = data.rth;
     saveState();
     rebuildWords();
     toast('Imported: ' + (imported.join(', ') || 'data'));
