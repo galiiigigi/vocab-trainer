@@ -1,6 +1,6 @@
 # Canadian English Vocabulary Trainer
 
-Main app: `vocab-trainer.html` (~3700 lines). PWA manifest & icons generated inline. Hosted on GitHub Pages.
+Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inline. Hosted on GitHub Pages.
 
 ## Files
 - `vocab-trainer.html` — the entire app (HTML/CSS/JS + inline PWA manifest/icons)
@@ -10,7 +10,7 @@ Main app: `vocab-trainer.html` (~3700 lines). PWA manifest & icons generated inl
 ## Architecture
 - Single HTML/CSS/JS file, no build tools
 - localStorage persistence (`vocabApp` key)
-- Gemini 2.0 Flash API for AI features
+- Gemini API (configurable model via `state.settings.geminiModel`) for AI features
 - Google Cloud TTS + browser TTS fallback
 - GitHub Gist cloud sync via Personal Access Token + REST API
 - SM-2 Spaced Repetition System
@@ -41,74 +41,77 @@ Main app: `vocab-trainer.html` (~3700 lines). PWA manifest & icons generated inl
 - **App Log** (~242): Console override, showAppLogs(), copyAppLogs()
 - **Word DB** (~300): Empty WORDS_RAW, CATEGORIES (16 cats), WORDS build with phonetic field
 - **State & Migrations** (~312): localStorage, theme, TTS, SRS settings
+- **Gemini Model** (~390): `getGeminiModel()`, `getGeminiUrl(key)` — configurable model selector
 - **SRS** (~349): SM-2 algorithm, getDueWords, getSessionWords
 - **TTS** (~469): speak(), googleSpeak(), fetchGoogleVoices(), buildVoiceOptions(), testGoogleTTS()
-- **API Key Tests** (~606): testGeminiKey() (simple prompt), testTtsKey() (list voices), testGistToken() (GET /user)
-- **Navigation** (~631): goTo(), renderScreen() — screens: home, quiz, cards, voice, chat, pretest, addwords, ear, words, stats, settings
-- **Home** (~663): Stat boxes (clickable→stats), due words, empty state onboarding, AI feature buttons
-- **Quiz** (~703): Timer, answerQuiz, dontKnowQuiz (~847), skipQuiz, markKnownQuiz, endSessionEarly
-- **Flashcards** (~941): Flip, rate, skip, markKnown, endSessionEarly
+- **cleanDefinition** (~539): Strips word itself from AI-generated definition starts
+- **getVocabPoolForPrompt** (~565): Gets up to 60 learner words for AI prompt reinforcement
+- **API Key Tests** (~606): testGeminiKey(), testTtsKey(), testGistToken()
+- **Navigation** (~631): goTo(), renderScreen()
+- **Home** (~663): Stat boxes, due words, empty state, AI feature buttons
+- **Quiz** (~703): Timer, answerQuiz, dontKnowQuiz, skipQuiz, markKnownQuiz, endSessionEarly
+- **Flashcards** (~941): Flip, rate, skip, markKnown, listeningMode, endSessionEarly
 - **Voice Test** (~1056): Mic recognition, fuzzyMatch, endSessionEarly
+- **Audio-Only Quiz** (~1133): `startAudioQuiz()`, listen-only quiz with full SRS, review, summary
 - **Mark Known** (~1215): markWordAsMastered, markKnownQuiz/Flashcard/Voice
+- **Flashcard Listening Mode** (~1344): `startListeningFlashcards()` — audio-only front, flip to reveal
 - **Word List** (~1260): Split render (search input fix), updateWordListResults()
-- **Duplicates** (~1308): AI-powered findDuplicateWords, per-word delete buttons (~1395), combine/merge
+- **Duplicates** (~1308): AI-powered findDuplicateWords, per-word delete, combine/merge
 - **Word Detail** (~1440): Modal with phonetic, grammar, SRS info, delete button
 - **Stats** (~1478): Stat grid, heatmap, category progress bars
-- **Settings** (~1554): Theme, API keys (Gemini + GitHub Gist token), TTS config, voice dropdown, RT thresholds, SRS intervals, word pack import, sync, danger zone, logs
-- **API Setup Guides** (~1940): showGeminiSetupGuide, showTtsSetupGuide — modal tutorials for obtaining API keys
-- **Sync** (~1729): v3 selective sync — clipboard + .json file + GitHub Gist; API Keys checkbox (opt-in, default off); `stripApiKeys()`, `getExportSettings()`
-- **GitHub Gist Sync** (~1990): showGistSetupGuide, findSyncGist, renderSlotPicker, buildGistSyncData, exportToGist, saveToGistSlot, deleteGistSlot, importFromGist, loadGist
-- **Word Pack** (~1960): Import JSON, format example with AI prompt
+- **Settings** (~1554): Theme, API keys, TTS config, Gemini model selector (6 models with descriptions/warnings), sync, danger zone
+- **Auto-Play Word List** (~1754): Podcast-style sequential playback (word→pause→definition→pause→example→gap→next)
+- **Sync** (~1729): v3 selective sync — clipboard + .json file + GitHub Gist
+- **GitHub Gist Sync** (~1990): showGistSetupGuide, findSyncGist, renderSlotPicker, exportToGist, importFromGist
+- **API Setup Guides** (~1940): showGeminiSetupGuide, showTtsSetupGuide
 - **rebuildWords()** (~1937): Merges WORDS_RAW + customWords, dedupes by name
+- **Gemini JSON Importer** (~2573): `parseGeminiImport()` — smart parser for arrays, dicts, wrapped objects
 - **Ear Training** (~1959): Dictation, minimal pairs, AI listening comprehension
+- **Shadowing Mode** (~3377): `startEarShadowing()` — listen, record, AI pronunciation feedback
+- **Substitution Drill** (~3675): `startSubDrill()` — FSI-style sentence substitution with AI evaluation
+- **Listen & Respond** (~3870): `startListenRespond()` — Pimsleur-style prompt→think→respond→AI feedback, 10 scenarios
 - **Placement Test** (~2244): AI-powered assessment, word pack recommendations
-- **Add Words** (~2521): Manual add with duplicate warning (~2603), AI auto-fill, AI suggest
-- **Duplicate Warning** (~2603): showDuplicateWarning() — replace/combine/keep both options
-- **forceAddWord** (~2638): Handles replace, combine definitions, keep both
-- **Gemini API** (~2896): callGemini with dual message format support
+- **Add Words** (~2521): Manual add with duplicate warning, AI auto-fill (multi-meaning), AI suggest
+- **Multi-Meaning AutoFill** (~4113): `syncMeaningsToFields()`, `renderMeaningsList()`, `removeMeaning()` — multiple senses per word
+- **AI AutoFill** (~4154): `aiAutoFill()` — returns all meanings array, fallback to single definition
+- **Duplicate Warning / forceAddWord**: replace/combine/keep both
+- **Gemini API** (~2896): callGemini, cleanGeminiText (~4426) strips json prefix/fences
 - **Voice Chat** (~2988): Recording, sendVoiceChat with Gemini audio
 - **AI Chat** (~3044): SCENARIOS array (16 scenarios), startChat, startFreeChat, customPrompt support
-- **Free Chat** (~3660): startFreeChat() — open-ended chat with bilingual grammar correction, reviews weak words
-- **Add Word from Chat** (~3870): showAddWordFromChatModal, addWordFromChatInput, addSuggestedWord, addAllSuggestedWords
+- **Free Chat** (~3660): Open-ended bilingual grammar correction, reviews weak words
+- **Add Word from Chat** (~3870): showAddWordFromChatModal, addSuggestedWord, addAllSuggestedWords
 - **AI Explain** (~3935): aiExplainWord for word detail
+- **AI Rephrase** (~5168): `aiRephraseWord()` single + `batchRephraseWords()` batch, with undo
 - **AI Quiz Feedback** (~3960): aiQuizExplain ("Why was I wrong?")
-- **Notifications** (~3980): requestNotificationPermission, initNotifications, checkNotificationTime — reminders at 8am/12pm/10pm
+- **Notifications** (~3980): requestNotificationPermission, initNotifications, checkNotificationTime
 - **Init** (~4010): DOMContentLoaded → rebuildWords, applyTheme, goTo('home'), SW register, initNotifications
 
 ## Bottom Nav
 Home | Quiz | Cards | Words | Settings (Stats accessible via stat boxes on home)
 
 ## Key Patterns
-- `formatMultiDef(def)` — numbered definitions for combined words
-- `getDailyWord()` — picks a random due/weak/random word for the home screen "Word of the Moment"
-- `startFreeChat()` — open-ended AI chat with bilingual grammar correction ([Correction] X/O/Tip format)
-- `showAddWordFromChatModal()` — modal to save a word during AI chat with AI auto-fill
-- `addSuggestedWord(idx)` / `addAllSuggestedWords()` — add AI-suggested words after chat ends
-- `requestNotificationPermission()` — request + enable push notifications
-- `checkNotificationTime()` — checks every 60s if it's time to send a reminder (8:00/12:00/22:00)
-- `deleteWordById(wordId)` — universal delete (all words are custom)
-- `deleteDupWord(groupIdx, which)` — per-word delete in duplicate review
-- `showDuplicateWarning()` + `forceAddWord()` — duplicate check on manual add
-- `exportSyncFile()` — downloads .json sync file (mobile-friendly export)
-- `importSyncFile(input)` — reads .json file via file picker (mobile-friendly import)
-- `stripApiKeys(settings)` — removes SENSITIVE_KEYS from settings for safe export
-- `getExportSettings(opt)` — returns full or stripped settings based on apiKeys option
-- `findSyncGist(token)` — lists gists, finds one with `vocab-slot-*.json` or `vocab-sync.json`, returns `{ gistId, slots, legacyFile }`
-- `renderSlotPicker(mode, gistId, slots, legacyFile)` — renders 5-slot picker UI in `sync-code-area`; export mode shows Save/Overwrite, import mode shows Load/--
-- `buildGistSyncData()` — builds sync payload with `_meta: { words, date }` added
-- `exportToGist()` — calls `findSyncGist` then renders slot picker in export mode
-- `saveToGistSlot(slotNum, gistId, isOccupied)` — saves to `vocab-slot-{N}.json`; confirm on overwrite and API keys; PATCHes existing or POSTs new gist
-- `deleteGistSlot(slotNum, gistId, mode)` — deletes a slot file from the gist (sets file to null via PATCH); confirm dialog; refreshes slot picker
-- `importFromGist()` — calls `findSyncGist` then renders slot picker in import mode; legacy `vocab-sync.json` shown with orange dashed border
-- `loadGist(gistId, fileName)` — downloads and applies a gist file (unchanged, ignores `_meta`)
-- `testGeminiKey()` — tests Gemini API key with a minimal prompt
-- `testTtsKey()` — tests Google Cloud TTS key via voices list endpoint
-- `testGistToken()` — tests GitHub token via GET /user, shows username on success
-- `showGeminiSetupGuide()` — in-app tutorial for Gemini API key setup
-- `showTtsSetupGuide()` — in-app tutorial for Google Cloud TTS API key setup
-- `showGistSetupGuide()` — in-app tutorial for GitHub token setup
+- `formatMultiDef(def)` — numbered definitions for combined/multi-meaning words
+- `cleanDefinition(word, def)` — strips word itself from AI definitions
+- `cleanGeminiText(text)` — strips `json\n` prefix and code fences from Gemini responses
+- `getVocabPoolForPrompt(excludeWord)` — up to 60 learner words for AI reinforcement
+- `getGeminiModel()` / `getGeminiUrl(key)` — configurable Gemini model (6 options)
+- `syncMeaningsToFields()` — syncs `pendingMeanings[]` to def/example text fields
+- `renderMeaningsList()` — displays multi-meaning preview with delete buttons
+- `aiRephraseWord(wordId)` / `batchRephraseWords()` — AI rephrase definitions with undo
+- `startAudioQuiz()` — audio-only quiz, full SRS integration
+- `startListeningFlashcards()` — audio-only front, flip to reveal
+- `startAutoPlay()` / `stopAutoPlay()` — podcast-style word list playback
+- `startEarShadowing()` — listen + record + AI pronunciation eval
+- `startSubDrill()` — FSI substitution drill, AI generates sentence + evaluates substitution
+- `startListenRespond(scenarioId)` — Pimsleur listen→think→record→AI eval, 10 workplace scenarios
+- `LISTEN_RESPOND_SCENARIOS` — 10 scenarios with difficulty levels (greeting, phone, meeting, interview, etc.)
+- `parseGeminiImport()` — smart JSON importer (arrays, dicts, wrapped objects)
+- `getDailyWord()` — random due/weak word for home "Word of the Moment"
+- `startFreeChat()` — bilingual grammar correction ([Correction] X/O/Tip format)
+- `showAddWordFromChatModal()` — save word during chat with AI auto-fill
 - `endSessionEarly(mode)` — End button for quiz, cards, voice, ear
 - `dontKnowQuiz()` — reveals answer without guessing, records quality 0
+- Gist sync: `findSyncGist`, `renderSlotPicker`, `exportToGist`, `importFromGist`, 5 save slots
 - Word search uses split rendering to avoid input focus loss
 - Theme: dark (default) / light via `[data-theme="light"]` CSS
 

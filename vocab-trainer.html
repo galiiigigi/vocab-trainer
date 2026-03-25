@@ -261,6 +261,11 @@ textarea.form-input{min-height:60px;resize:vertical}
 .pron-ai-feedback{background:rgba(108,92,231,.08);border:1px solid rgba(108,92,231,.15);border-radius:10px;padding:12px;font-size:13px;color:var(--text2);line-height:1.6;margin-top:8px}
 .retry-btn{background:none;border:none;color:var(--orange);font-size:11px;cursor:pointer;padding:2px 6px;opacity:.6;transition:opacity .15s}
 .retry-btn:active{opacity:1}
+/* Substitution Drill & Listen Respond */
+.highlight-word{color:var(--accent);font-weight:700;text-decoration:underline;text-decoration-style:wavy}
+.think-timer{font-size:48px;font-weight:800;color:var(--accent);animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.lr-phase-label{font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -880,6 +885,10 @@ function renderHome(el){
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="startVoice()">&#127908; Voice Test</button>
       <button class="btn btn-ghost" style="flex:1;border:1px solid var(--green);color:var(--green)" onclick="goTo('ear')">&#127911; Ear Training</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--accent);color:var(--accent)" onclick="startSubDrill()">&#128260; Substitution Drill</button>
+      <button class="btn btn-ghost" style="flex:1;border:1px solid var(--blue);color:var(--blue)" onclick="startListenRespond()">&#127908; Listen & Respond</button>
     </div>`;
 }
 
@@ -3239,6 +3248,18 @@ function renderEarTraining(el){
         <div><h3 style="margin:0">Listening Comprehension</h3><p style="font-size:12px;color:var(--text3);margin:0">Listen to a passage and answer questions (AI)</p></div>
       </div>
     </div>
+    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startSubDrill()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#128260;</span>
+        <div><h3 style="margin:0">Substitution Drill (FSI)</h3><p style="font-size:12px;color:var(--text3);margin:0">Replace words in sentences to build flexibility</p></div>
+      </div>
+    </div>
+    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startListenRespond()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#127908;</span>
+        <div><h3 style="margin:0">Listen & Respond (Pimsleur)</h3><p style="font-size:12px;color:var(--text3);margin:0">Hear a prompt, think, then respond by voice</p></div>
+      </div>
+    </div>
     <button class="btn btn-ghost mt" onclick="goTo('home')">Back to Home</button>`;
 }
 
@@ -3256,6 +3277,8 @@ function renderEarActive(el){
   else if(earState.mode==='pairs') renderMinimalPairs(el);
   else if(earState.mode==='shadowing') renderShadowing(el);
   else if(earState.mode==='listening') renderListening(el);
+  else if(earState.mode==='subdrill') renderSubDrill(el);
+  else if(earState.mode==='listenrespond') renderListenRespond(el);
 }
 
 function renderDictation(el){
@@ -3666,6 +3689,481 @@ function renderEarSummary(el){
       </div>` : ''}
     </div>
     <button class="btn mt" onclick="earState=null;goTo('ear')">Try Again</button>
+    <button class="btn btn-ghost mt" onclick="earState=null;goTo('home')">Home</button>`;
+}
+
+// ===== SUBSTITUTION DRILL (FSI) =====
+let subDrillRec = null;
+
+function startSubDrill(){
+  if(!state.settings.apiKey){ toast('Add Gemini API key in Settings'); goTo('settings'); return; }
+  const pool = WORDS.filter(w => w.example && w.example.length > 10);
+  if(pool.length < 4){ toast('Need at least 4 words with examples'); return; }
+  shuffle(pool);
+  earState = { mode:'subdrill', words:pool.slice(0,8), current:0, score:0, results:[], loading:true, currentDrill:null, ended:false };
+  subDrillRec = null;
+  goTo('ear');
+  generateSubDrill();
+}
+
+async function generateSubDrill(){
+  const w = earState.words[earState.current];
+  const vocabPool = getVocabPoolForPrompt(w.word, 30);
+  const prompt = `Create a substitution drill for ESL learners.
+
+Target word: "${w.word}" (${w.definition})
+
+The learner knows these words: ${vocabPool}
+
+Create a natural English sentence using "${w.word}", then identify the part that can be substituted with another word to make a different but grammatically correct sentence.
+
+Reply in EXACTLY this JSON format:
+{"sentence":"I need to commute to work every morning.","highlightWord":"commute","hint":"Replace the highlighted word with another word from your vocabulary","possibleSubs":["travel","drive","walk"]}
+
+Keep the sentence at intermediate ESL level. The highlighted word should be the target word or closely related.`;
+
+  const result = await callGemini([{role:'user',text:prompt}],'You are an FSI-style drill instructor for Canadian English ESL. Respond only with valid JSON.');
+  earState.loading = false;
+  if(result){
+    try{
+      const cleaned = cleanGeminiText(result);
+      const data = JSON.parse(cleaned);
+      earState.currentDrill = data;
+    }catch(e){ earState.currentDrill = { sentence:w.example||`Use "${w.word}" in a sentence.`, highlightWord:w.word, hint:'Replace the highlighted word', possibleSubs:[] }; }
+  } else { earState.currentDrill = { sentence:w.example||`Use "${w.word}" in a sentence.`, highlightWord:w.word, hint:'Replace the highlighted word', possibleSubs:[] }; }
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function renderSubDrill(el){
+  if(earState.current >= earState.words.length){ renderSubDrillSummary(el); return; }
+  if(earState.loading){
+    el.innerHTML = `<div class="text-center" style="padding-top:60px"><div style="font-size:32px;margin-bottom:12px">&#128260;</div><h3>Generating drill...</h3><p class="subtitle">AI is creating a substitution exercise</p></div>`;
+    return;
+  }
+  const w = earState.words[earState.current];
+  const drill = earState.currentDrill;
+  const result = earState.results[earState.current];
+  const highlighted = drill.sentence.replace(new RegExp('\\b(' + escapeRegex(drill.highlightWord) + ')\\b','gi'), '<span class="highlight-word">$1</span>');
+
+  el.innerHTML = `
+    <div class="progress-bar"><div class="progress-fill" style="width:${(earState.current/earState.words.length)*100}%"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text3);margin-bottom:12px">
+      <span>${earState.current+1} / ${earState.words.length}</span>
+      <button onclick="endSessionEarly('ear')" style="background:none;border:none;color:var(--red);font-size:12px;font-weight:600;cursor:pointer">&#10005; End</button>
+      <span>Score: ${earState.score}</span>
+    </div>
+    <div class="card text-center mb">
+      <div style="font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">&#128260; Substitution Drill</div>
+      <div style="font-size:16px;color:var(--text);margin-bottom:8px;line-height:1.6">${highlighted}</div>
+      <button class="btn btn-ghost btn-sm" onclick="speak(\`${drill.sentence.replace(/`/g,'').replace(/'/g,"\\'")}\`)" style="font-size:16px">&#128264; Listen</button>
+      <div style="font-size:12px;color:var(--text3);margin-top:8px">${drill.hint}</div>
+    </div>
+    ${!result ? `
+      <div class="card mb">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Type your new sentence (replacing "<strong>${drill.highlightWord}</strong>"):</div>
+        <input type="text" id="sub-input" class="input" placeholder="Type your substituted sentence..." style="margin-bottom:8px" onkeydown="if(event.key==='Enter')submitSubDrill()">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="submitSubDrill()" style="flex:2">Submit</button>
+          <button class="btn btn-ghost" onclick="skipSubDrill()" style="flex:1">Skip</button>
+        </div>
+        <div id="sub-loading"></div>
+      </div>
+    ` : `
+      <div class="card mb">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:700;font-size:14px;color:${result.correct?'var(--green)':'var(--orange)'}">${result.correct?'&#10003; Correct':'&#10007; Needs Work'}</span>
+        </div>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:4px">Your sentence:</div>
+        <div style="font-size:14px;color:var(--text);margin-bottom:8px;font-style:italic">"${result.userSentence}"</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">${result.feedback.replace(/\n/g,'<br>')}</div>
+        ${result.corrected?`<div style="font-size:12px;color:var(--green);margin-top:6px">Suggested: "${result.corrected}"</div>`:''}
+      </div>
+      <button class="btn" onclick="nextSubDrill()">Next &#8594;</button>
+    `}`;
+  if(!result) setTimeout(()=>{const inp=document.getElementById('sub-input');if(inp)inp.focus()},100);
+}
+
+async function submitSubDrill(){
+  const inp = document.getElementById('sub-input');
+  if(!inp) return;
+  const userSentence = inp.value.trim();
+  if(!userSentence){ toast('Type a sentence first'); return; }
+  const loadEl = document.getElementById('sub-loading');
+  if(loadEl) loadEl.innerHTML = '<div class="ai-loading" style="margin-top:12px"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--text3);margin-top:4px">AI is evaluating...</div>';
+
+  const w = earState.words[earState.current];
+  const drill = earState.currentDrill;
+  const prompt = `Evaluate this substitution drill answer.
+
+Original sentence: "${drill.sentence}"
+Highlighted word to replace: "${drill.highlightWord}"
+Learner's new sentence: "${userSentence}"
+
+Check:
+1. Did the learner successfully replace "${drill.highlightWord}" with a different word?
+2. Is the new sentence grammatically correct?
+3. Does it make sense semantically?
+
+Reply in JSON: {"correct":true,"feedback":"Brief feedback in English and Chinese","corrected":"Optional corrected version if wrong"}
+If mostly correct with minor issues, still mark correct:true but mention the issues.`;
+
+  const result = await callGemini([{role:'user',text:prompt}],'You are an FSI drill evaluator for Canadian English ESL. Be encouraging. Respond only with valid JSON.');
+  let evalData = { correct:false, feedback:'Could not evaluate.', corrected:'' };
+  if(result){
+    try{
+      const cleaned = cleanGeminiText(result);
+      evalData = JSON.parse(cleaned);
+    }catch(e){ evalData.feedback = result; }
+  }
+  if(evalData.correct) earState.score++;
+  earState.results[earState.current] = { userSentence, correct:evalData.correct, feedback:evalData.feedback, corrected:evalData.corrected||'', word:w, drill };
+  updateSRS(w.id, evalData.correct ? 4 : 1, evalData.correct ? 2 : 5);
+  recordActivity(evalData.correct);
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function skipSubDrill(){
+  const w = earState.words[earState.current];
+  earState.results[earState.current] = { userSentence:'(skipped)', correct:false, feedback:'Skipped', corrected:'', word:w, drill:earState.currentDrill };
+  updateSRS(w.id, 0, 10);
+  recordActivity(false);
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function nextSubDrill(){
+  earState.current++;
+  if(earState.current < earState.words.length){
+    earState.loading = true;
+    earState.currentDrill = null;
+    renderEarActive(document.getElementById('screen-ear'));
+    generateSubDrill();
+  } else {
+    renderEarActive(document.getElementById('screen-ear'));
+  }
+}
+
+function renderSubDrillSummary(el){
+  earState.ended = true;
+  const total = earState.words.length;
+  const pct = total > 0 ? Math.round(earState.score / total * 100) : 0;
+  el.innerHTML = `
+    <div class="text-center" style="padding-top:40px">
+      <div style="font-size:48px;margin-bottom:8px">${pct>=80?'&#127942;':pct>=50?'&#128170;':'&#128260;'}</div>
+      <h2>Substitution Drill Complete!</h2>
+      <p class="subtitle">${earState.score} / ${total} correct (${pct}%)</p>
+    </div>
+    <div class="card mt" style="text-align:left">
+      ${earState.results.map((r,i)=>`<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:${r.correct?'var(--green)':'var(--red)'}">&#${r.correct?'10003':'10007'}; <strong>${r.word.word}</strong></span>
+          <span style="font-size:11px;color:var(--text3)">${r.correct?'Correct':'Needs Work'}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px">Original: "${r.drill.sentence}"</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:1px">Your: "${r.userSentence}"</div>
+      </div>`).join('')}
+    </div>
+    <button class="btn mt" onclick="earState=null;startSubDrill()">Try Again</button>
+    <button class="btn btn-ghost mt" onclick="earState=null;goTo('home')">Home</button>`;
+}
+
+// ===== LISTEN & RESPOND (PIMSLEUR) =====
+const LISTEN_RESPOND_SCENARIOS = [
+  {id:'greeting', label:'Workplace Greetings', icon:'&#128075;', difficulty:1},
+  {id:'smalltalk', label:'Office Small Talk', icon:'&#128172;', difficulty:1},
+  {id:'phone', label:'Phone Calls', icon:'&#128222;', difficulty:2},
+  {id:'meeting', label:'Meeting Participation', icon:'&#128188;', difficulty:2},
+  {id:'directions', label:'Giving Directions', icon:'&#128506;', difficulty:1},
+  {id:'interview', label:'Job Interview Q&A', icon:'&#127775;', difficulty:3},
+  {id:'shopping', label:'Store Interactions', icon:'&#128722;', difficulty:1},
+  {id:'appointment', label:'Making Appointments', icon:'&#128197;', difficulty:2},
+  {id:'complaint', label:'Polite Complaints', icon:'&#128556;', difficulty:3},
+  {id:'emergency', label:'Emergency Situations', icon:'&#128680;', difficulty:2},
+];
+let lrRec = null;
+
+function startListenRespond(scenarioId){
+  if(!state.settings.apiKey){ toast('Add Gemini API key in Settings'); goTo('settings'); return; }
+  if(!scenarioId){
+    earState = { mode:'listenrespond', phase:'pick' };
+    goTo('ear');
+    return;
+  }
+  const scenario = LISTEN_RESPOND_SCENARIOS.find(s=>s.id===scenarioId);
+  earState = { mode:'listenrespond', phase:'loading', scenario, prompts:[], current:0, score:0, results:[], ended:false };
+  lrRec = null;
+  goTo('ear');
+  generateLRPrompts(scenarioId);
+}
+
+async function generateLRPrompts(scenarioId){
+  const scenario = LISTEN_RESPOND_SCENARIOS.find(s=>s.id===scenarioId);
+  const vocabPool = getVocabPoolForPrompt('', 40);
+  const prompt = `Create 6 conversational prompts for a Pimsleur-style listen-and-respond drill.
+
+Scenario: ${scenario.label}
+Difficulty: ${scenario.difficulty}/3
+The learner knows these words: ${vocabPool}
+
+For each prompt, create a realistic thing someone might say to the learner in this scenario. The learner must respond naturally.
+
+Reply in EXACTLY this JSON format:
+{"prompts":[{"prompt":"Good morning! How was your weekend?","expectedIdea":"Respond with a greeting and briefly share what you did","keyPhrases":["It was great","I went to","Thanks for asking"],"difficulty":${scenario.difficulty}}]}
+
+Create 6 prompts, gradually increasing in complexity. Use Canadian English. Keep prompts natural and workplace-appropriate.`;
+
+  const result = await callGemini([{role:'user',text:prompt}],'You are a Pimsleur-style drill instructor for Canadian English. Create realistic workplace conversation prompts. Respond only with valid JSON.');
+  if(result){
+    try{
+      const cleaned = cleanGeminiText(result);
+      const data = JSON.parse(cleaned);
+      earState.prompts = data.prompts || [];
+      earState.phase = 'speak';
+    }catch(e){ toast('AI format error, try again'); earState = { mode:'listenrespond', phase:'pick' }; }
+  } else { toast('AI error'); earState = { mode:'listenrespond', phase:'pick' }; }
+  renderEarActive(document.getElementById('screen-ear'));
+  // Auto-speak first prompt
+  if(earState.phase === 'speak' && earState.prompts.length > 0){
+    setTimeout(()=>speak(earState.prompts[0].prompt), 500);
+  }
+}
+
+function renderListenRespond(el){
+  if(earState.phase === 'pick') return renderLRPicker(el);
+  if(earState.phase === 'loading'){
+    el.innerHTML = `<div class="text-center" style="padding-top:60px"><div style="font-size:32px;margin-bottom:12px">&#127908;</div><h3>Preparing prompts...</h3><p class="subtitle">AI is creating conversation scenarios</p></div>`;
+    return;
+  }
+  if(earState.current >= earState.prompts.length){ renderLRSummary(el); return; }
+  const p = earState.prompts[earState.current];
+  const result = earState.results[earState.current];
+  const isRec = lrRec && lrRec.recording;
+  const phase = earState.phase; // speak, think, record, evaluated
+
+  el.innerHTML = `
+    <div class="progress-bar"><div class="progress-fill" style="width:${(earState.current/earState.prompts.length)*100}%"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text3);margin-bottom:12px">
+      <span>${earState.current+1} / ${earState.prompts.length}</span>
+      <button onclick="endSessionEarly('ear')" style="background:none;border:none;color:var(--red);font-size:12px;font-weight:600;cursor:pointer">&#10005; End</button>
+      <span>Score: ${earState.score}</span>
+    </div>
+    <div class="card text-center mb">
+      <div class="lr-phase-label">&#127908; ${earState.scenario.label}</div>
+      <div style="font-size:15px;color:var(--text);margin-bottom:12px;line-height:1.6;font-style:italic">"${p.prompt}"</div>
+      <button class="btn btn-ghost btn-sm" onclick="speak(\`${p.prompt.replace(/`/g,'').replace(/'/g,"\\'")}\`)" style="font-size:16px">&#128264; Listen Again</button>
+    </div>
+    ${!result ? `
+      ${phase === 'speak' ? `
+        <div class="card text-center mb">
+          <div style="font-size:13px;color:var(--text3);margin-bottom:12px">Listen to the prompt, then prepare your response</div>
+          <button class="btn" onclick="startLRThink()" style="background:linear-gradient(135deg,var(--accent),#a29bfe)">&#128161; Ready to Respond</button>
+        </div>
+      ` : phase === 'think' ? `
+        <div class="card text-center mb">
+          <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Think of your response...</div>
+          <div class="think-timer" id="lr-timer">3</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px">Recording starts automatically</div>
+        </div>
+      ` : phase === 'record' ? `
+        <div class="card text-center mb">
+          <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Your turn — say your response now!</div>
+          <button class="btn ${isRec?'btn-red':''}" onclick="toggleLRRecord()" style="font-size:20px;width:72px;height:72px;border-radius:50%;margin:0 auto;display:flex;align-items:center;justify-content:center">
+            ${isRec ? '&#9899;' : '&#127908;'}
+          </button>
+          <div style="font-size:11px;color:var(--text3);margin-top:6px">${isRec ? 'Recording... tap to stop' : 'Tap to start recording'}</div>
+          ${lrRec && lrRec.blobUrl && !isRec ? `
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" onclick="playLRRecording()">&#9654; Play back</button>
+              <button class="btn btn-sm" onclick="submitLRResponse()" style="background:var(--accent)">&#129302; Get AI Feedback</button>
+              <button class="btn btn-ghost btn-sm" onclick="lrRec=null;renderEarActive(document.getElementById('screen-ear'))">&#128260; Re-record</button>
+            </div>
+          ` : ''}
+          <div id="lr-loading"></div>
+        </div>
+      ` : ''}
+    ` : `
+      <div class="card mb">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:700;font-size:14px;color:${result.rating==='Good'?'var(--green)':result.rating==='Needs Work'?'var(--orange)':'var(--red)'}">${result.rating || 'Evaluated'}</span>
+          ${result.blobUrl ? '<button class="btn btn-ghost btn-sm" onclick="playLRResult('+earState.current+')" style="font-size:12px">&#9654; Replay</button>' : ''}
+        </div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">${result.feedback.replace(/\n/g,'<br>')}</div>
+        ${result.suggested?`<div style="font-size:12px;color:var(--green);margin-top:8px;padding:8px;background:rgba(0,184,148,.08);border-radius:6px"><strong>Suggested response:</strong> "${result.suggested}"</div>`:''}
+      </div>
+      <button class="btn" onclick="nextLRPrompt()">Next &#8594;</button>
+    `}`;
+
+  if(phase === 'think') startLRCountdown();
+}
+
+function renderLRPicker(el){
+  const hasKey = !!state.settings.apiKey;
+  el.innerHTML = `
+    <h2>&#127908; Listen & Respond</h2>
+    <p class="subtitle">Hear a prompt, think, then respond by voice — Pimsleur style</p>
+    ${!hasKey?'<div class="card card-sm mb" style="border:1px solid var(--orange)"><div style="font-size:13px;color:var(--orange)">&#9888; Requires Gemini API key in <a href="#" onclick="goTo(\'settings\');return false" style="color:var(--accent2)">Settings</a></div></div>':''}
+    ${LISTEN_RESPOND_SCENARIOS.map(s=>{
+      const diffLabel = s.difficulty===1?'Beginner':s.difficulty===2?'Intermediate':'Advanced';
+      const diffColor = s.difficulty===1?'var(--green)':s.difficulty===2?'var(--orange)':'var(--red)';
+      return `<div class="card mb" onclick="${hasKey?`startListenRespond('${s.id}')`:`toast('Add API key first')`}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:28px">${s.icon}</span>
+          <div style="flex:1"><h3 style="margin:0">${s.label}</h3></div>
+          <span style="font-size:10px;color:${diffColor};border:1px solid ${diffColor};padding:2px 6px;border-radius:4px">${diffLabel}</span>
+        </div>
+      </div>`;
+    }).join('')}
+    <button class="btn btn-ghost mt" onclick="earState=null;goTo('ear')">Back</button>`;
+}
+
+function startLRThink(){
+  earState.phase = 'think';
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function startLRCountdown(){
+  let count = 3;
+  const timerEl = document.getElementById('lr-timer');
+  if(!timerEl) return;
+  const interval = setInterval(()=>{
+    count--;
+    if(count <= 0){
+      clearInterval(interval);
+      earState.phase = 'record';
+      renderEarActive(document.getElementById('screen-ear'));
+      // Auto-start recording
+      setTimeout(()=>toggleLRRecord(), 300);
+    } else {
+      if(timerEl) timerEl.textContent = count;
+    }
+  }, 1000);
+}
+
+async function toggleLRRecord(){
+  if(lrRec && lrRec.recording){
+    lrRec.recording = false;
+    if(lrRec.recorder && lrRec.recorder.state === 'recording'){
+      lrRec.recorder.onstop = () => {
+        if(lrRec.stream) lrRec.stream.getTracks().forEach(t=>t.stop());
+        if(lrRec.chunks.length){
+          const blob = new Blob(lrRec.chunks, {type:'audio/webm'});
+          lrRec.blobUrl = URL.createObjectURL(blob);
+        }
+        renderEarActive(document.getElementById('screen-ear'));
+      };
+      lrRec.recorder.stop();
+    }
+  } else {
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      lrRec = { recording:true, recorder:null, stream, chunks:[], blobUrl:null };
+      try{ lrRec.recorder = new MediaRecorder(stream, {mimeType:'audio/webm;codecs=opus'}); }
+      catch(e){ lrRec.recorder = new MediaRecorder(stream); }
+      lrRec.recorder.ondataavailable = e => { if(e.data.size>0) lrRec.chunks.push(e.data); };
+      lrRec.recorder.start();
+      renderEarActive(document.getElementById('screen-ear'));
+    }catch(e){ toast('Microphone access denied'); }
+  }
+}
+
+function playLRRecording(){
+  if(lrRec && lrRec.blobUrl) new Audio(lrRec.blobUrl).play();
+}
+
+function playLRResult(idx){
+  const r = earState.results[idx];
+  if(r && r.blobUrl) new Audio(r.blobUrl).play();
+}
+
+async function submitLRResponse(){
+  if(!lrRec || !lrRec.blobUrl) return;
+  const loadEl = document.getElementById('lr-loading');
+  if(loadEl) loadEl.innerHTML = '<div class="ai-loading" style="margin-top:12px"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--text3);margin-top:4px">AI is evaluating...</div>';
+
+  const p = earState.prompts[earState.current];
+  const resp = await fetch(lrRec.blobUrl);
+  const blob = await resp.blob();
+  const base64 = await new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.readAsDataURL(blob);
+  });
+
+  const prompt = `The learner is doing a Pimsleur-style listen-and-respond drill.
+
+Scenario: ${earState.scenario.label}
+They were asked: "${p.prompt}"
+A good response would: ${p.expectedIdea}
+Key phrases to look for: ${p.keyPhrases.join(', ')}
+
+Listen to the learner's spoken response and evaluate:
+1. **Rating**: Good / Needs Work / Try Again
+2. **Content**: Did they respond appropriately to the prompt?
+3. **Grammar**: Any grammar issues?
+4. **Pronunciation**: Any notable pronunciation issues?
+5. **Suggested Response**: Give a natural example response
+
+Give feedback in BOTH English and Chinese (中文). Keep it brief and encouraging (5-7 lines max). Start with the rating on the first line like: "Rating: Good"
+Then after feedback, on a new line write: "Suggested: [a natural example response]"`;
+
+  const result = await callGeminiWithAudio(base64, 'audio/webm', prompt, 'You are a friendly Pimsleur-style conversation coach for Canadian English ESL learners. Be encouraging and specific.');
+
+  if(result){
+    let rating = 'Evaluated';
+    if(/good/i.test(result.split('\n')[0])) rating = 'Good';
+    else if(/needs?\s*work/i.test(result.split('\n')[0])) rating = 'Needs Work';
+    else if(/try\s*again/i.test(result.split('\n')[0])) rating = 'Try Again';
+
+    let suggested = '';
+    const sugMatch = result.match(/Suggested:\s*"?([^"]+)"?/i);
+    if(sugMatch) suggested = sugMatch[1].trim();
+
+    const isGood = rating === 'Good';
+    if(isGood) earState.score++;
+    earState.results[earState.current] = { feedback:result.replace(/Suggested:.*$/im,'').trim(), rating, blobUrl:lrRec.blobUrl, prompt:p, suggested };
+    recordActivity(isGood);
+  } else {
+    earState.results[earState.current] = { feedback:'Could not evaluate. Check your API key.', rating:'Error', blobUrl:lrRec.blobUrl, prompt:p, suggested:'' };
+  }
+  earState.phase = 'evaluated';
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function nextLRPrompt(){
+  lrRec = null;
+  earState.current++;
+  if(earState.current < earState.prompts.length){
+    earState.phase = 'speak';
+    renderEarActive(document.getElementById('screen-ear'));
+    setTimeout(()=>speak(earState.prompts[earState.current].prompt), 500);
+  } else {
+    renderEarActive(document.getElementById('screen-ear'));
+  }
+}
+
+function renderLRSummary(el){
+  earState.ended = true;
+  const total = earState.prompts.length;
+  const pct = total > 0 ? Math.round(earState.score / total * 100) : 0;
+  el.innerHTML = `
+    <div class="text-center" style="padding-top:40px">
+      <div style="font-size:48px;margin-bottom:8px">${pct>=80?'&#127942;':pct>=50?'&#128170;':'&#127908;'}</div>
+      <h2>Listen & Respond Complete!</h2>
+      <p class="subtitle">${earState.score} / ${total} rated Good (${pct}%)</p>
+      <p class="subtitle">${earState.scenario.label}</p>
+    </div>
+    <div class="card mt" style="text-align:left">
+      ${earState.results.map((r,i)=>`<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:${r.rating==='Good'?'var(--green)':r.rating==='Needs Work'?'var(--orange)':'var(--red)'}">
+            &#${r.rating==='Good'?'10003':'10007'}; ${r.rating}
+          </span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-top:2px">"${r.prompt.prompt}"</div>
+        ${r.suggested?`<div style="font-size:11px;color:var(--green);margin-top:2px">Suggested: "${r.suggested}"</div>`:''}
+      </div>`).join('')}
+    </div>
+    <button class="btn mt" onclick="earState=null;startListenRespond('${earState.scenario.id}')">Try Again</button>
+    <button class="btn btn-ghost mt" onclick="earState=null;startListenRespond()">Other Scenarios</button>
     <button class="btn btn-ghost mt" onclick="earState=null;goTo('home')">Home</button>`;
 }
 
