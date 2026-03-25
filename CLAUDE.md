@@ -43,6 +43,7 @@ Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inl
 - **State & Migrations** (~312): localStorage, theme, TTS, SRS settings
 - **Gemini Model** (~390): `getGeminiModel()`, `getGeminiUrl(key)` — configurable model selector
 - **SRS** (~349): SM-2 algorithm, getDueWords, getSessionWords
+- **XP & CEFR System** (~570): CEFR_LEVELS, getCEFRLevel, getCEFRProgress, getSkillLevels, awardXP (diminishing returns per word+mode)
 - **TTS** (~469): speak(), googleSpeak(), fetchGoogleVoices(), buildVoiceOptions(), testGoogleTTS()
 - **cleanDefinition** (~539): Strips word itself from AI-generated definition starts
 - **getVocabPoolForPrompt** (~565): Gets up to 60 learner words for AI prompt reinforcement
@@ -111,6 +112,10 @@ Home | Quiz | Cards | Words | Settings (Stats accessible via stat boxes on home)
 - `showAddWordFromChatModal()` — save word during chat with AI auto-fill
 - `endSessionEarly(mode)` — End button for quiz, cards, voice, ear
 - `dontKnowQuiz()` — reveals answer without guessing, records quality 0
+- `awardXP(source, wordId, amount)` — XP with diminishing returns (1st=100%, 2nd=50%, 3rd=25%, 4th+=0% per word+source)
+- `getCEFRLevel()` / `getCEFRProgress()` — current level + progress to next based on total XP
+- `getSkillLevels()` — per-skill CEFR estimates (vocab, speaking, listening, drills)
+- `CEFR_LEVELS` — A1→C2 with XP thresholds, vocab targets, IELTS equivalents
 - Gist sync: `findSyncGist`, `renderSlotPicker`, `exportToGist`, `importFromGist`, 5 save slots
 - Word search uses split rendering to avoid input focus loss
 - Theme: dark (default) / light via `[data-theme="light"]` CSS

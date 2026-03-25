@@ -169,6 +169,21 @@ h3{font-size:16px;font-weight:600;margin-bottom:8px}
 .text-center{text-align:center}
 .streak-fire{font-size:32px;text-align:center}
 
+/* Level System */
+.level-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.level-badge{width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.3);flex-shrink:0}
+.level-info{flex:1;min-width:0}
+.level-title{font-size:15px;font-weight:700;color:var(--text)}
+.level-subtitle{font-size:11px;color:var(--text3)}
+.xp-bar{height:8px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden;margin:6px 0 4px}
+.xp-fill{height:100%;border-radius:4px;transition:width .5s}
+.xp-text{font-size:10px;color:var(--text3);display:flex;justify-content:space-between}
+.skill-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
+.skill-box{background:var(--bg3);border-radius:8px;padding:8px 4px;text-align:center}
+.skill-emoji{font-size:18px}
+.skill-name{font-size:9px;color:var(--text3);margin-top:1px}
+.skill-val{font-size:12px;font-weight:700;margin-top:2px}
+
 /* Word detail modal */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:150;display:flex;align-items:flex-end;justify-content:center}
 .modal{background:var(--bg2);border-radius:16px 16px 0 0;padding:24px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto}
@@ -392,6 +407,8 @@ if(state.settings.autoPlayAudio === undefined) state.settings.autoPlayAudio = tr
 if(!state.settings.geminiModel) state.settings.geminiModel = 'gemini-2.0-flash';
 if(!state._lastNotifTimes) state._lastNotifTimes = {};
 if(!state.rtHistory) state.rtHistory = [];
+if(!state.xp) state.xp = { total:0, wordXP:{}, dailyXP:{} };
+if(!state.settings.targetLevel) state.settings.targetLevel = 'B2';
 
 function getGeminiModel(){ return state.settings.geminiModel || 'gemini-2.0-flash'; }
 function getGeminiUrl(key){ return `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(key)}`; }
@@ -476,6 +493,7 @@ function rtToQuality(rt, correct, textParts){
 
 function updateSRS(wordId, quality, rt){
   const wp = getWordProgress(wordId);
+  const wasFirst = wp.repetitions === 0;
   wp.lastQuality = quality;
   wp.lastRT = rt;
   wp.lastReviewDate = todayKey();
@@ -498,6 +516,12 @@ function updateSRS(wordId, quality, rt){
   }
   const now = new Date();
   wp.nextReview = new Date(now.getFullYear(), now.getMonth(), now.getDate() + wp.interval).getTime();
+  // XP: award based on quality and whether it was a due review
+  if(quality >= 3){
+    const isDueReview = !wasFirst && wp.nextReview <= Date.now();
+    awardXP('review', wordId, isDueReview ? 10 : 15);
+  }
+  checkMilestoneXP(wordId);
   saveState();
 }
 
@@ -559,6 +583,108 @@ function recordActivity(correct){
     state.lastActiveDate = today;
   }
   saveState();
+}
+
+// ===== XP & CEFR LEVEL SYSTEM =====
+const CEFR_LEVELS = [
+  { level:'A1', label:'Beginner',       xp:0,     vocab:0,    ielts:'3.0', color:'#b2bec3' },
+  { level:'A2', label:'Elementary',      xp:3000,  vocab:500,  ielts:'4.0', color:'#e17055' },
+  { level:'B1', label:'Intermediate',    xp:10000, vocab:1500, ielts:'5.0', color:'#fdcb6e' },
+  { level:'B2', label:'Upper-Inter',     xp:25000, vocab:2500, ielts:'6.5', color:'#0984e3' },
+  { level:'C1', label:'Advanced',        xp:50000, vocab:4000, ielts:'7.5', color:'#00b894' },
+  { level:'C2', label:'Mastery',         xp:100000,vocab:5000, ielts:'8.5', color:'#a29bfe' },
+];
+
+function getCEFRLevel(){
+  const xp = state.xp.total;
+  let current = CEFR_LEVELS[0];
+  for(let i = CEFR_LEVELS.length - 1; i >= 0; i--){
+    if(xp >= CEFR_LEVELS[i].xp){ current = CEFR_LEVELS[i]; break; }
+  }
+  return current;
+}
+
+function getNextCEFRLevel(){
+  const xp = state.xp.total;
+  for(const lv of CEFR_LEVELS){
+    if(xp < lv.xp) return lv;
+  }
+  return null; // already at max
+}
+
+function getCEFRProgress(){
+  const current = getCEFRLevel();
+  const next = getNextCEFRLevel();
+  if(!next) return { current, next:null, pct:100, xpNeeded:0 };
+  const rangeXP = next.xp - current.xp;
+  const progressXP = state.xp.total - current.xp;
+  return { current, next, pct:Math.min(100, Math.round(progressXP / rangeXP * 100)), xpNeeded:next.xp - state.xp.total };
+}
+
+// Skill-level CEFR estimates
+function getSkillLevels(){
+  const mastered = WORDS.filter(w => getWordStatus(w.id)==='mastered').length;
+  const familiar = WORDS.filter(w => getWordStatus(w.id)==='familiar').length;
+  const vocabScore = mastered + familiar * 0.5;
+
+  const acc = state.totalAnswered > 0 ? state.totalCorrect / state.totalAnswered : 0;
+  const todayData = state.dailyActivity[todayKey()] || {reviewed:0,correct:0};
+  const todayAcc = todayData.reviewed > 0 ? todayData.correct / todayData.reviewed : 0;
+
+  function vocabToCEFR(v){ return v >= 5000?'C2': v >= 4000?'C1': v >= 2500?'B2': v >= 1500?'B1': v >= 500?'A2':'A1'; }
+  function accToCEFR(a){ return a >= 0.92?'C2': a >= 0.88?'C1': a >= 0.82?'B2': a >= 0.75?'B1': a >= 0.60?'A2':'A1'; }
+
+  return {
+    vocab: vocabToCEFR(vocabScore),
+    speaking: accToCEFR(acc * 0.9), // approximation from quiz/drill accuracy
+    listening: accToCEFR(acc * 0.95),
+    drills: accToCEFR(acc)
+  };
+}
+
+// XP reward system — rewards NEW achievements, not repetition
+function awardXP(source, wordId, amount){
+  if(!state.xp) state.xp = { total:0, wordXP:{}, dailyXP:{} };
+  const today = todayKey();
+  if(!state.xp.dailyXP[today]) state.xp.dailyXP[today] = 0;
+
+  // Word-level tracking: each word+source combo has diminishing returns
+  if(wordId){
+    const key = wordId + ':' + source;
+    if(!state.xp.wordXP[key]) state.xp.wordXP[key] = 0;
+    const prev = state.xp.wordXP[key];
+    // Diminishing: 1st=100%, 2nd=50%, 3rd=25%, 4th+=0%
+    let multiplier = 1;
+    if(prev >= 3) multiplier = 0;
+    else if(prev >= 2) multiplier = 0.25;
+    else if(prev >= 1) multiplier = 0.5;
+    const actual = Math.round(amount * multiplier);
+    if(actual > 0){
+      state.xp.total += actual;
+      state.xp.dailyXP[today] += actual;
+      state.xp.wordXP[key] = prev + 1;
+    }
+  } else {
+    // Non-word XP (milestones, combos)
+    state.xp.total += amount;
+    state.xp.dailyXP[today] += amount;
+  }
+  // Clean up old daily entries (keep 90 days)
+  const keys = Object.keys(state.xp.dailyXP).sort();
+  if(keys.length > 90){
+    keys.slice(0, keys.length - 90).forEach(k => delete state.xp.dailyXP[k]);
+  }
+  saveState();
+}
+
+// Check and award milestone XP when word status changes
+function checkMilestoneXP(wordId){
+  const status = getWordStatus(wordId);
+  if(status === 'familiar'){
+    awardXP('milestone-familiar', wordId, 20);
+  } else if(status === 'mastered'){
+    awardXP('milestone-mastered', wordId, 30);
+  }
 }
 
 // ===== UTILS =====
@@ -883,17 +1009,38 @@ function renderHome(el){
   const learning = active.filter(w => {const s=getWordStatus(w.id); return s==='learning'||s==='beginner';}).length;
   const todayData = state.dailyActivity[todayKey()] || {reviewed:0,correct:0};
   const acc = todayData.reviewed > 0 ? Math.round(todayData.correct/todayData.reviewed*100) : 0;
+  const todayXP = (state.xp && state.xp.dailyXP && state.xp.dailyXP[todayKey()]) || 0;
+
+  // CEFR Level
+  const cefrProg = getCEFRProgress();
+  const skills = getSkillLevels();
+  const cefrColor = cefrProg.current.color;
+  const targetLv = CEFR_LEVELS.find(l => l.level === (state.settings.targetLevel || 'B2'));
 
   const dailyWord = getDailyWord();
   el.innerHTML = `
-    <div class="text-center mb"><div class="streak-fire">${state.streak > 0 ? '&#128293;' : '&#128218;'}</div>
-    <h2>${state.streak > 0 ? state.streak + ' Day Streak!' : 'Start Learning!'}</h2>
-    <p class="subtitle">Canadian English Vocabulary Trainer</p></div>
-    <div class="stat-grid mb" onclick="goTo('stats')" style="cursor:pointer">
-      <div class="stat-box"><div class="stat-num" style="color:var(--green)">${learned}</div><div class="stat-label">Mastered</div></div>
-      <div class="stat-box"><div class="stat-num" style="color:var(--blue)">${familiar}</div><div class="stat-label">Familiar</div></div>
-      <div class="stat-box"><div class="stat-num" style="color:var(--orange)">${learning}</div><div class="stat-label">Learning</div></div>
-      <div class="stat-box"><div class="stat-num" style="color:var(--text3)">${newW}</div><div class="stat-label">New</div></div>
+    <div class="card mb" onclick="goTo('stats')" style="cursor:pointer;padding:16px">
+      <div class="level-header">
+        <div class="level-badge" style="background:linear-gradient(135deg,${cefrColor},${cefrColor}cc)">${cefrProg.current.level}</div>
+        <div class="level-info">
+          <div class="level-title">${cefrProg.current.label} Speaker</div>
+          <div class="level-subtitle">CEFR ${cefrProg.current.level} · ≈ IELTS ${cefrProg.current.ielts}${targetLv ? ' · Target: ' + targetLv.level : ''}</div>
+          <div class="xp-bar"><div class="xp-fill" style="width:${cefrProg.pct}%;background:linear-gradient(90deg,${cefrColor},${cefrColor}99)"></div></div>
+          <div class="xp-text"><span>${state.xp.total.toLocaleString()} XP</span>${cefrProg.next ? '<span>' + cefrProg.xpNeeded.toLocaleString() + ' XP to ' + cefrProg.next.level + '</span>' : '<span>Max level!</span>'}</div>
+        </div>
+      </div>
+      <div class="skill-grid">
+        <div class="skill-box"><div class="skill-emoji">&#128214;</div><div class="skill-name">Vocab</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.vocab)||{}).color||'#fff'}">${skills.vocab}</div></div>
+        <div class="skill-box"><div class="skill-emoji">&#128483;</div><div class="skill-name">Speaking</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.speaking)||{}).color||'#fff'}">${skills.speaking}</div></div>
+        <div class="skill-box"><div class="skill-emoji">&#128066;</div><div class="skill-name">Listening</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.listening)||{}).color||'#fff'}">${skills.listening}</div></div>
+        <div class="skill-box"><div class="skill-emoji">&#128221;</div><div class="skill-name">Drills</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.drills)||{}).color||'#fff'}">${skills.drills}</div></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--accent)">${todayXP}</div><div style="font-size:10px;color:var(--text3)">Today XP</div></div>
+      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--orange)">${state.streak > 0 ? state.streak : 0}</div><div style="font-size:10px;color:var(--text3)">Streak</div></div>
+      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--green)">${learned}</div><div style="font-size:10px;color:var(--text3)">Mastered</div></div>
+      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--blue)">${acc}%</div><div style="font-size:10px;color:var(--text3)">Accuracy</div></div>
     </div>
     ${dailyWord ? `<div class="daily-word" onclick="showWordDetail(${dailyWord.id})">
       <div class="daily-word-label">Word of the Moment</div>
@@ -903,7 +1050,7 @@ function renderHome(el){
     </div>` : ''}
     ${due > 0 ? `<div class="card card-sm mb" style="text-align:center"><span style="font-size:20px;font-weight:700;color:var(--accent2)">${due}</span> <span style="font-size:13px;color:var(--text3)">words due for review</span></div>` : ''}
     ${todayData.reviewed > 0 ? `<div class="card card-sm mb"><div style="display:flex;justify-content:space-between;font-size:13px">
-      <span>Today: ${todayData.reviewed} reviewed</span><span>Accuracy: ${acc}%</span></div></div>` : ''}
+      <span>Today: ${todayData.reviewed} reviewed</span><span>${WORDS.length} words total</span></div></div>` : ''}
     ${WORDS.length === 0 ? `<div class="card mb" style="text-align:center;border:1px dashed var(--accent);padding:20px">
       <div style="font-size:14px;color:var(--text2);margin-bottom:8px">Your library is empty. Get started!</div>
       <button class="btn btn-sm mb" onclick="goTo('pretest')">&#128218; Take Vocabulary Assessment</button>
@@ -2146,8 +2293,29 @@ function renderStats(el){
     </div>`;
   }
 
+  const cefrProg = getCEFRProgress();
+  const skills = getSkillLevels();
+  const cefrColor = cefrProg.current.color;
+
   el.innerHTML = `
     <h2>Statistics</h2>
+    <div class="card mb" style="padding:16px">
+      <div class="level-header">
+        <div class="level-badge" style="background:linear-gradient(135deg,${cefrColor},${cefrColor}cc)">${cefrProg.current.level}</div>
+        <div class="level-info">
+          <div class="level-title">${cefrProg.current.label} Speaker</div>
+          <div class="level-subtitle">CEFR ${cefrProg.current.level} · ≈ IELTS ${cefrProg.current.ielts} · ${state.xp.total.toLocaleString()} XP</div>
+          <div class="xp-bar"><div class="xp-fill" style="width:${cefrProg.pct}%;background:linear-gradient(90deg,${cefrColor},${cefrColor}99)"></div></div>
+          <div class="xp-text"><span>${cefrProg.pct}% to ${cefrProg.next ? cefrProg.next.level : 'Max'}</span>${cefrProg.next ? '<span>' + cefrProg.xpNeeded.toLocaleString() + ' XP needed</span>' : ''}</div>
+        </div>
+      </div>
+      <div class="skill-grid" style="margin-top:8px">
+        <div class="skill-box"><div class="skill-emoji">&#128214;</div><div class="skill-name">Vocab</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.vocab)||{}).color||'#fff'}">${skills.vocab}</div></div>
+        <div class="skill-box"><div class="skill-emoji">&#128483;</div><div class="skill-name">Speaking</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.speaking)||{}).color||'#fff'}">${skills.speaking}</div></div>
+        <div class="skill-box"><div class="skill-emoji">&#128066;</div><div class="skill-name">Listening</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.listening)||{}).color||'#fff'}">${skills.listening}</div></div>
+        <div class="skill-box"><div class="skill-emoji">&#128221;</div><div class="skill-name">Drills</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.drills)||{}).color||'#fff'}">${skills.drills}</div></div>
+      </div>
+    </div>
     <div class="stat-grid mb">
       <div class="stat-box"><div class="stat-num" style="color:var(--green)">${mastered}</div><div class="stat-label">Mastered</div></div>
       <div class="stat-box"><div class="stat-num" style="color:var(--blue)">${familiar}</div><div class="stat-label">Familiar</div></div>
@@ -2441,6 +2609,14 @@ function renderSettings(el){
       ` : ''}
     </div>
     <div class="card mt">
+      <h3>Target CEFR Level</h3>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Set your goal — this affects XP targets and progress display</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${CEFR_LEVELS.filter(l=>l.level!=='A1').map(l=>`<button class="btn btn-sm ${state.settings.targetLevel===l.level?'':'btn-ghost'}" style="min-width:0;padding:6px 12px;font-size:12px;${state.settings.targetLevel===l.level?'background:'+l.color:'border-color:'+l.color+';color:'+l.color}" onclick="state.settings.targetLevel='${l.level}';saveState();renderSettings(document.getElementById('screen-settings'))">${l.level} (${l.label})</button>`).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">Current: ${getCEFRLevel().level} · ${state.xp.total.toLocaleString()} XP</div>
+    </div>
+    <div class="card mt">
       <h3>RT Speed Thresholds</h3>
       <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Adaptive — automatically adjusts based on your performance. Reading time is deducted from response time so longer questions are fair.</div>
       <div style="font-size:12px;color:var(--text2)">
@@ -2570,8 +2746,8 @@ or even: {"potluck":"a meal where everyone brings a dish"}' style="font-size:12p
     </div>
     <div class="card mt">
       <h3>Danger Zone</h3>
-      <button class="btn btn-ghost btn-sm mb" style="color:var(--orange)" onclick="if(confirm('Reset all learning progress? Words will stay, but mastery levels reset.')){state.wordProgress={};state.dailyActivity={};state.streak=0;state.totalQuizzes=0;state.totalCorrect=0;state.totalAnswered=0;saveState();toast('Progress reset');goTo('home')}">Reset Progress</button>
-      <button class="btn btn-red btn-sm" onclick="if(confirm('Delete ALL words and progress? This cannot be undone.')){state.customWords=[];state.wordProgress={};state.dailyActivity={};state.streak=0;state.totalQuizzes=0;state.totalCorrect=0;state.totalAnswered=0;saveState();rebuildWords();toast('All data cleared');goTo('home')}">Clear Everything</button>
+      <button class="btn btn-ghost btn-sm mb" style="color:var(--orange)" onclick="if(confirm('Reset all learning progress? Words will stay, but mastery levels and XP reset.')){state.wordProgress={};state.dailyActivity={};state.streak=0;state.totalQuizzes=0;state.totalCorrect=0;state.totalAnswered=0;state.xp={total:0,wordXP:{},dailyXP:{}};state.rtHistory=[];saveState();toast('Progress reset');goTo('home')}">Reset Progress</button>
+      <button class="btn btn-red btn-sm" onclick="if(confirm('Delete ALL words and progress? This cannot be undone.')){state.customWords=[];state.wordProgress={};state.dailyActivity={};state.streak=0;state.totalQuizzes=0;state.totalCorrect=0;state.totalAnswered=0;state.xp={total:0,wordXP:{},dailyXP:{}};state.rtHistory=[];saveState();rebuildWords();toast('All data cleared');goTo('home')}">Clear Everything</button>
     </div>
     <div class="card mt">
       <h3>Logs</h3>
@@ -2769,7 +2945,7 @@ function exportSyncFile(){
   if(opt.words){ syncData.cw = state.customWords || []; syncData.ash = state.aiSuggestHistory || []; }
   if(opt.progress){ syncData.wp = state.wordProgress; }
   if(opt.settings){ syncData.st = getExportSettings(opt); syncData.tu = state.ttsUsage; }
-  if(opt.stats){ syncData.da = state.dailyActivity; syncData.s = state.streak; syncData.la = state.lastActiveDate; syncData.tq = state.totalQuizzes; syncData.tc = state.totalCorrect; syncData.ta = state.totalAnswered; }
+  if(opt.stats){ syncData.da = state.dailyActivity; syncData.s = state.streak; syncData.la = state.lastActiveDate; syncData.tq = state.totalQuizzes; syncData.tc = state.totalCorrect; syncData.ta = state.totalAnswered; syncData.xp = state.xp; syncData.rth = state.rtHistory; }
   const json = JSON.stringify(syncData, null, 2);
   const blob = new Blob([json], {type:'application/json'});
   const url = URL.createObjectURL(blob);
@@ -2802,6 +2978,8 @@ function importSyncFile(input){
       if(data.tq !== undefined){ state.totalQuizzes = data.tq; imported.push('stats'); }
       if(data.tc !== undefined) state.totalCorrect = data.tc;
       if(data.ta !== undefined) state.totalAnswered = data.ta;
+      if(data.xp) state.xp = data.xp;
+      if(data.rth) state.rtHistory = data.rth;
       saveState();
       rebuildWords();
       toast('Imported: ' + (imported.join(', ') || 'data'));
@@ -2984,7 +3162,7 @@ function buildGistSyncData(){
   if(opt.words){ syncData.cw = state.customWords || []; syncData.ash = state.aiSuggestHistory || []; }
   if(opt.progress){ syncData.wp = state.wordProgress; }
   if(opt.settings){ syncData.st = getExportSettings(opt); syncData.tu = state.ttsUsage; }
-  if(opt.stats){ syncData.da = state.dailyActivity; syncData.s = state.streak; syncData.la = state.lastActiveDate; syncData.tq = state.totalQuizzes; syncData.tc = state.totalCorrect; syncData.ta = state.totalAnswered; }
+  if(opt.stats){ syncData.da = state.dailyActivity; syncData.s = state.streak; syncData.la = state.lastActiveDate; syncData.tq = state.totalQuizzes; syncData.tc = state.totalCorrect; syncData.ta = state.totalAnswered; syncData.xp = state.xp; syncData.rth = state.rtHistory; }
   syncData._meta = { words: (state.customWords || []).length, date: new Date().toISOString() };
   return { syncData, opt };
 }
@@ -4162,6 +4340,8 @@ Then after feedback, on a new line write: "Suggested: [a natural example respons
     if(isGood) earState.score++;
     earState.results[earState.current] = { feedback:result.replace(/Suggested:.*$/im,'').trim(), rating, blobUrl:lrRec.blobUrl, prompt:p, suggested };
     recordActivity(isGood);
+    // XP for Listen & Respond (scenario-based, no word ID)
+    awardXP('listen-respond:' + earState.scenario.id, null, isGood ? 25 : 10);
   } else {
     earState.results[earState.current] = { feedback:'Could not evaluate. Check your API key.', rating:'Error', blobUrl:lrRec.blobUrl, prompt:p, suggested:'' };
   }
@@ -4565,6 +4745,9 @@ function addCustomWord(){
   pendingMeanings = [];
   saveState();
   rebuildWords();
+  // XP for learning a new word
+  const addedWord = WORDS.find(w => w.word.toLowerCase() === word.toLowerCase());
+  if(addedWord) awardXP('newword', addedWord.id, 20);
   toast('"'+word+'" added!');
   renderAddWords(document.getElementById('screen-addwords'));
 }
