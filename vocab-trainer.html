@@ -1086,28 +1086,15 @@ function renderHome(el){
       <button class="btn btn-sm mb" onclick="goTo('pretest')">&#128218; Take Vocabulary Assessment</button>
       <button class="btn btn-ghost btn-sm" onclick="goTo('words')">Import Word Pack</button>
     </div>` : `${due > 0 ? `<button class="btn mb" onclick="startQuiz()" style="position:relative">${due} words due &mdash; Start Review</button>` : ''}`}
-    <div class="home-actions">
-      <button class="btn" style="background:linear-gradient(135deg,var(--accent),#a29bfe)" onclick="startFreeChat()">&#128172; Free Chat</button>
+    <div class="home-actions" style="display:flex;flex-direction:column;gap:8px">
       <button class="btn" style="background:linear-gradient(135deg,var(--green),#00d2a0)" onclick="startLanguageParent()">&#129303; Language Parent</button>
-      <button class="btn btn-ghost" onclick="goTo('chat')">&#10022; Scenarios</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="startChat('softener')">&#128172; Softener</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--blue);color:var(--blue)" onclick="startChat('star')">&#127775; STAR</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--accent2);color:var(--accent2)" onclick="startAudioQuiz()">&#127911; Audio Quiz</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--accent2);color:var(--accent2)" onclick="startListeningFlashcards()">&#127911; Listen Cards</button>
-      <button class="btn btn-ghost" onclick="startVoice()">&#127908; Voice Test</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--green);color:var(--green)" onclick="goTo('ear')">&#127911; Ear Training</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--accent);color:var(--accent)" onclick="startSubDrill()">&#128260; Sub Drill</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--blue);color:var(--blue)" onclick="startListenRespond()">&#127908; Listen & Respond</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="startWordMixing()">&#128256; Word Mixing</button>
-      <button class="btn btn-ghost" style="border:1px solid var(--green);color:var(--green)" onclick="startBrainSoak()">&#127754; Brain Soak</button>
+      <button class="btn" style="background:linear-gradient(135deg,var(--accent),#a29bfe)" onclick="startFreeChat()">&#128172; Free Chat</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="flex:1" onclick="startBrainSoak()">&#127754; Brain Soak</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="startListenRespond()">&#127908; Listen & Respond</button>
+      </div>
+      <button class="btn btn-ghost" onclick="showPracticeHub()" style="border:1px dashed var(--accent);color:var(--accent2);font-size:14px">&#9776; All Practice Modes</button>
     </div>`;
-
-  // Mobile fallback: home-actions uses flex-wrap in mobile mode
-  if(state.settings.layout !== 'desktop'){
-    const actions = el.querySelector('.home-actions');
-    if(actions) actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px';
-    actions?.querySelectorAll('.btn').forEach(b => b.style.flex = '1 1 45%');
-  }
 }
 
 // ===== QUIZ =====
@@ -6185,6 +6172,60 @@ function checkNotificationTime(){
   } else {
     try{ new Notification('Vocab Trainer', {body:msg, tag:'vocab-reminder-'+timeStr}); }catch(e){}
   }
+}
+
+// ===== PRACTICE HUB =====
+function showPracticeHub(){
+  const hasKey = !!state.settings.apiKey;
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.innerHTML=''">
+      <div style="background:var(--bg2);border-radius:var(--radius);padding:20px;max-width:440px;width:100%;margin-top:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h2 style="margin:0;font-size:18px">All Practice Modes</h2>
+          <button onclick="document.getElementById('modal-root').innerHTML=''" style="background:none;border:none;color:var(--text3);font-size:22px;cursor:pointer">&times;</button>
+        </div>
+
+        <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Conversation</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startLanguageParent()" style="justify-content:flex-start;text-align:left">&#129303; Language Parent <span style="font-size:11px;color:var(--text3);margin-left:auto">Safe, simple chats</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startFreeChat()" style="justify-content:flex-start;text-align:left">&#128172; Free Chat <span style="font-size:11px;color:var(--text3);margin-left:auto">Grammar correction</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();goTo('chat')" style="justify-content:flex-start;text-align:left">&#10022; Scenarios <span style="font-size:11px;color:var(--text3);margin-left:auto">Role-play situations</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startChat('softener')" style="justify-content:flex-start;text-align:left">&#128172; Softener Practice <span style="font-size:11px;color:var(--text3);margin-left:auto">Polite phrasing</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startChat('star')" style="justify-content:flex-start;text-align:left">&#127775; STAR Interview <span style="font-size:11px;color:var(--text3);margin-left:auto">Behavioral answers</span></button>
+        </div>
+
+        <div style="font-size:12px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Drills</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startWordMixing()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128256; Word Mixing <span style="font-size:11px;color:var(--text3);margin-left:auto">Combine words creatively</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startSubDrill()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128260; Substitution Drill <span style="font-size:11px;color:var(--text3);margin-left:auto">FSI-style replace words</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startListenRespond()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#127908; Listen & Respond <span style="font-size:11px;color:var(--text3);margin-left:auto">Pimsleur-style speak</span></button>
+        </div>
+
+        <div style="font-size:12px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Listening</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startBrainSoak()" style="justify-content:flex-start;text-align:left">&#127754; Brain Soak <span style="font-size:11px;color:var(--text3);margin-left:auto">Passive immersion</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarShadowing()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128483; Shadowing <span style="font-size:11px;color:var(--text3);margin-left:auto">Repeat after AI</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarDictation()" style="justify-content:flex-start;text-align:left">&#9997; Dictation <span style="font-size:11px;color:var(--text3);margin-left:auto">Type what you hear</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarMinimalPairs()" style="justify-content:flex-start;text-align:left">&#128066; Minimal Pairs <span style="font-size:11px;color:var(--text3);margin-left:auto">Similar sounds</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarListening()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#127897; Listening Comprehension <span style="font-size:11px;color:var(--text3);margin-left:auto">Passage + questions</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startAudioQuiz()" style="justify-content:flex-start;text-align:left">&#127911; Audio Quiz <span style="font-size:11px;color:var(--text3);margin-left:auto">Listen-only quiz</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startListeningFlashcards()" style="justify-content:flex-start;text-align:left">&#127911; Listen Cards <span style="font-size:11px;color:var(--text3);margin-left:auto">Audio-only flashcards</span></button>
+        </div>
+
+        <div style="font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Vocabulary</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startQuiz()" style="justify-content:flex-start;text-align:left">&#9997; Quiz <span style="font-size:11px;color:var(--text3);margin-left:auto">Multiple choice</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();goTo('cards')" style="justify-content:flex-start;text-align:left">&#128195; Flashcards <span style="font-size:11px;color:var(--text3);margin-left:auto">Flip & rate</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startVoice()" style="justify-content:flex-start;text-align:left">&#127908; Voice Test <span style="font-size:11px;color:var(--text3);margin-left:auto">Say the word</span></button>
+          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();goTo('pretest')" style="justify-content:flex-start;text-align:left">&#128218; Placement Test <span style="font-size:11px;color:var(--text3);margin-left:auto">AI assessment</span></button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function closePracticeHub(){
+  document.getElementById('modal-root').innerHTML = '';
 }
 
 // ===== LANGUAGE PARENT CHAT (Chris Lonsdale) =====
