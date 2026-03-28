@@ -987,6 +987,8 @@ function qualityClass(q){ return q>=5?'rt-perfect':q>=4?'rt-good':q>=3?'rt-hard'
 function goTo(screen){
   // Stop auto-play when leaving word list
   if(currentScreen === 'words' && screen !== 'words' && autoPlayState) stopAutoPlay();
+  // Stop brain soak when leaving ear training
+  if(currentScreen === 'ear' && screen !== 'ear' && earState && earState.mode === 'brainsoak') stopBrainSoak();
   currentScreen = screen;
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1086,6 +1088,7 @@ function renderHome(el){
     </div>` : `${due > 0 ? `<button class="btn mb" onclick="startQuiz()" style="position:relative">${due} words due &mdash; Start Review</button>` : ''}`}
     <div class="home-actions">
       <button class="btn" style="background:linear-gradient(135deg,var(--accent),#a29bfe)" onclick="startFreeChat()">&#128172; Free Chat</button>
+      <button class="btn" style="background:linear-gradient(135deg,var(--green),#00d2a0)" onclick="startLanguageParent()">&#129303; Language Parent</button>
       <button class="btn btn-ghost" onclick="goTo('chat')">&#10022; Scenarios</button>
       <button class="btn btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="startChat('softener')">&#128172; Softener</button>
       <button class="btn btn-ghost" style="border:1px solid var(--blue);color:var(--blue)" onclick="startChat('star')">&#127775; STAR</button>
@@ -1095,6 +1098,8 @@ function renderHome(el){
       <button class="btn btn-ghost" style="border:1px solid var(--green);color:var(--green)" onclick="goTo('ear')">&#127911; Ear Training</button>
       <button class="btn btn-ghost" style="border:1px solid var(--accent);color:var(--accent)" onclick="startSubDrill()">&#128260; Sub Drill</button>
       <button class="btn btn-ghost" style="border:1px solid var(--blue);color:var(--blue)" onclick="startListenRespond()">&#127908; Listen & Respond</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="startWordMixing()">&#128256; Word Mixing</button>
+      <button class="btn btn-ghost" style="border:1px solid var(--green);color:var(--green)" onclick="startBrainSoak()">&#127754; Brain Soak</button>
     </div>`;
 
   // Mobile fallback: home-actions uses flex-wrap in mobile mode
@@ -3514,6 +3519,18 @@ function renderEarTraining(el){
         <div><h3 style="margin:0">Listen & Respond (Pimsleur)</h3><p style="font-size:12px;color:var(--text3);margin:0">Hear a prompt, think, then respond by voice</p></div>
       </div>
     </div>
+    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startWordMixing()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#128256;</span>
+        <div><h3 style="margin:0">Word Mixing (Lonsdale)</h3><p style="font-size:12px;color:var(--text3);margin:0">Combine 2-3 known words into creative sentences</p></div>
+      </div>
+    </div>
+    <div class="card mb" onclick="startBrainSoak()" style="cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#127754;</span>
+        <div><h3 style="margin:0">Brain Soak</h3><p style="font-size:12px;color:var(--text3);margin:0">Passive immersion — listen to sentences on loop while you relax</p></div>
+      </div>
+    </div>
     <button class="btn btn-ghost mt" onclick="goTo('home')">Back to Home</button>`;
 }
 
@@ -3533,6 +3550,8 @@ function renderEarActive(el){
   else if(earState.mode==='listening') renderListening(el);
   else if(earState.mode==='subdrill') renderSubDrill(el);
   else if(earState.mode==='listenrespond') renderListenRespond(el);
+  else if(earState.mode==='wordmixing') renderWordMixing(el);
+  else if(earState.mode==='brainsoak') renderBrainSoak(el);
 }
 
 function renderDictation(el){
@@ -3587,6 +3606,7 @@ function checkDictation(){
   // Update SRS for the word
   updateSRS(w.id, correct ? 4 : 1, correct ? 2 : 5);
   recordActivity(correct);
+  awardXP('dictation', w.id, correct ? 8 : 3);
   renderEarActive(document.getElementById('screen-ear'));
 }
 
@@ -3789,6 +3809,7 @@ Give feedback in BOTH English and Chinese (中文). Keep it brief and encouragin
     earState.results[earState.current] = { feedback:result, rating, blobUrl:shadowRec.blobUrl, word:w };
     updateSRS(w.id, isGood ? 4 : 2, isGood ? 2 : 5);
     recordActivity(isGood);
+    awardXP('shadowing', w.id, isGood ? 8 : 3);
   } else {
     earState.results[earState.current] = { feedback:'Could not evaluate. Check your Gemini API key.', rating:'Error', blobUrl:shadowRec.blobUrl, word:w };
   }
@@ -3919,6 +3940,7 @@ function answerListening(qi, oi){
     wordsForQ.forEach(w => {
       updateSRS(w.id, correct ? 4 : 2, correct ? 2 : 4);
       recordActivity(correct);
+      awardXP('listening', w.id, correct ? 8 : 3);
     });
   }
   renderEarActive(document.getElementById('screen-ear'));
@@ -4073,6 +4095,7 @@ If mostly correct with minor issues, still mark correct:true but mention the iss
   earState.results[earState.current] = { userSentence, correct:evalData.correct, feedback:evalData.feedback, corrected:evalData.corrected||'', word:w, drill };
   updateSRS(w.id, evalData.correct ? 4 : 1, evalData.correct ? 2 : 5);
   recordActivity(evalData.correct);
+  awardXP('subdrill', w.id, evalData.correct ? 10 : 3);
   renderEarActive(document.getElementById('screen-ear'));
 }
 
@@ -5554,7 +5577,19 @@ async function endChat(){
   chatState.ended = true;
   const convo = chatState.messages.map(m=>`${m.role==='user'?'Learner':'Partner'}: ${m.text}`).join('\n');
   const targetList = chatState.targetWords.map(w=>`${w.word}: ${w.definition}`).join('\n');
-  const feedbackPrompt = `You helped a newcomer to Canada practice English in this scenario: "${chatState.scenario.title}".
+  const feedbackPrompt = chatState.isLanguageParent
+    ? `You were a Language Parent (Chris Lonsdale method) for an ESL learner.
+Here is the conversation:
+${convo}
+
+Give brief, warm feedback (3-5 bullet points):
+- What topics they communicated about successfully (focus on WHAT they said, not HOW)
+- New words or phrases they picked up during the conversation
+- Their confidence growth during the session
+- One simple phrase they could try using tomorrow in real life
+- Overall encouragement — emphasize how much they communicated, not accuracy
+Keep it very encouraging and simple. Use bullet points with -. Include Chinese translation for any suggested phrases.`
+    : `You helped a newcomer to Canada practice English in this scenario: "${chatState.scenario.title}".
 Here is the conversation:
 ${convo}
 
@@ -5571,10 +5606,12 @@ Keep it short and friendly. Use bullet points with -.`;
   renderChat(el, true);
   const feedback = await callGemini([{role:'user',text:feedbackPrompt}],'You are a friendly ESL teacher giving brief feedback on a conversation practice session.');
   chatState.feedback = feedback;
+  const chatXPSource = chatState.isLanguageParent ? 'langparent' : chatState.isFreeChat ? 'freechat' : 'chat:' + chatState.scenario.id;
   chatState.targetWords.forEach(w=>{
     if(chatState.usedWords.has(w.word)){
       updateSRS(w.id,4,2);
       recordActivity(true);
+      awardXP(chatXPSource, w.id, 10);
     }
   });
   // Suggest new words from conversation
@@ -5610,6 +5647,15 @@ function renderChatStart(el){
         <div>
           <h3 style="margin:0;color:var(--accent2)">Free Chat</h3>
           <p style="font-size:12px;color:var(--text2);margin:2px 0 0">Chat about anything &middot; Bilingual grammar correction &middot; Reviews your weak words</p>
+        </div>
+      </div>
+    </div>
+    <div class="card mb" style="border:2px solid var(--green);background:linear-gradient(135deg,var(--bg2),rgba(0,184,148,.08));cursor:pointer" onclick="startLanguageParent()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#129303;</span>
+        <div>
+          <h3 style="margin:0;color:var(--green)">Language Parent</h3>
+          <p style="font-size:12px;color:var(--text2);margin:2px 0 0">Safe, simple conversations &middot; Rephrases instead of correcting &middot; Chris Lonsdale method</p>
         </div>
       </div>
     </div>
@@ -5657,7 +5703,7 @@ function renderChat(el, loading){
         </div>
         <button class="btn btn-sm btn-ghost mt" onclick="addAllSuggestedWords()">Add All</button>
       </div>` : ''}
-      <button class="btn mb" onclick="${chatState.isFreeChat?'startFreeChat()':'startChat(\''+chatState.scenario.id+'\')'}">Try Again</button>
+      <button class="btn mb" onclick="${chatState.isLanguageParent?'startLanguageParent()':chatState.isFreeChat?'startFreeChat()':'startChat(\''+chatState.scenario.id+'\')'}">Try Again</button>
       <button class="btn btn-ghost mb" onclick="chatState=null;renderChatStart(document.getElementById('screen-chat'))">Pick New Scenario</button>
       <button class="btn btn-ghost" onclick="goTo('home')">Home</button>`;
     return;
@@ -6139,6 +6185,336 @@ function checkNotificationTime(){
   } else {
     try{ new Notification('Vocab Trainer', {body:msg, tag:'vocab-reminder-'+timeStr}); }catch(e){}
   }
+}
+
+// ===== LANGUAGE PARENT CHAT (Chris Lonsdale) =====
+function startLanguageParent(){
+  const scenario = {id:'langparent',title:'Language Parent',desc:'Safe, simple conversations with a patient language parent',categories:Object.keys(CATEGORIES),icon:'&#129303;'};
+  const due = getDueWords();
+  const weak = WORDS.filter(w => {const s=getWordStatus(w.id); return s==='beginner'||s==='learning';});
+  const reviewWords = [...due, ...weak];
+  shuffle(reviewWords);
+  const targetWords = reviewWords.slice(0,10);
+  const wordList = targetWords.length ? targetWords.map(w => w.word + ' (' + w.definition + ')').join(', ') : 'none yet';
+  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, isFreeChat:false, isLanguageParent:true };
+  chatState.systemPrompt = `You are a Language Parent — a warm, patient conversation partner for an adult ESL learner in Canada. You follow Chris Lonsdale's Language Parent method.
+
+Your rules:
+1. **Speak simply** — use short sentences (5-10 words), common words, present tense mostly. Match the learner's level.
+2. **Never correct directly** — if the learner makes a mistake, DO NOT say "you should say X" or add a [Correction] section. Instead, naturally rephrase what they said correctly in your next response (recasting).
+   Example: Learner: "Yesterday I go to store" → You: "Oh, you went to the store? What did you buy?"
+3. **Confirm understanding** — show you understood by rephrasing their meaning, then ask a simple follow-up question.
+4. **Use body language cues** — describe your reactions with words like *nods*, *smiles*, *thinks* in asterisks to create a safe atmosphere.
+5. **Expand gradually** — when the learner seems comfortable, introduce ONE new word or phrase naturally. If they seem confused, simplify immediately.
+6. **Be encouraging** — react positively to their attempts. "That's a great way to say it!" / "I understand you perfectly!"
+7. **Stay conversational** — talk about everyday Canadian life (weather, food, weekend, work, hobbies). Keep it relevant and interesting.
+8. **Keep responses SHORT** — 1-3 sentences max. Leave space for the learner to talk.
+
+The learner is studying these words (use them naturally when relevant): ${wordList}
+
+Start by warmly greeting the learner and asking a simple, friendly question about their day.`;
+  goTo('chat');
+  sendChatAI();
+}
+
+// ===== WORD MIXING DRILL (Chris Lonsdale "10 verbs × 10 nouns") =====
+function startWordMixing(){
+  if(!state.settings.apiKey){ toast('Add Gemini API key in Settings'); goTo('settings'); return; }
+  const pool = WORDS.filter(w => w.definition && w.definition.length > 5);
+  if(pool.length < 6){ toast('Need at least 6 words to start mixing'); return; }
+  shuffle(pool);
+  // Create 8 rounds, each with 2-3 words to combine
+  const rounds = [];
+  for(let i = 0; i < 8 && i * 3 < pool.length; i++){
+    const count = 2 + (Math.random() > 0.5 ? 1 : 0); // 2 or 3 words
+    const start = i * 3;
+    if(start + count <= pool.length){
+      rounds.push(pool.slice(start, start + count));
+    }
+  }
+  if(rounds.length < 3){ toast('Not enough words'); return; }
+  earState = { mode:'wordmixing', rounds, current:0, score:0, results:[], ended:false };
+  goTo('ear');
+}
+
+function renderWordMixing(el){
+  if(earState.current >= earState.rounds.length){ renderWordMixingSummary(el); return; }
+  const words = earState.rounds[earState.current];
+  const result = earState.results[earState.current];
+
+  el.innerHTML = `
+    <div class="progress-bar"><div class="progress-fill" style="width:${(earState.current/earState.rounds.length)*100}%"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text3);margin-bottom:12px">
+      <span>${earState.current+1} / ${earState.rounds.length}</span>
+      <button onclick="endSessionEarly('ear')" style="background:none;border:none;color:var(--red);font-size:12px;font-weight:600;cursor:pointer">&#10005; End</button>
+      <span>Score: ${earState.score}</span>
+    </div>
+    <div class="card text-center mb">
+      <div style="font-size:11px;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">&#128256; Word Mixing — make a sentence using ALL these words</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:12px">
+        ${words.map(w => `<div style="background:var(--bg3);border:2px solid var(--accent);border-radius:10px;padding:10px 16px">
+          <div style="font-size:18px;font-weight:800;color:var(--accent2)">${w.word}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${w.definition.length > 50 ? w.definition.substring(0,50)+'...' : w.definition}</div>
+        </div>`).join('')}
+      </div>
+      <div style="font-size:12px;color:var(--text3)">Combine ${words.length === 2 ? 'both' : 'all three'} words into one natural English sentence</div>
+    </div>
+    ${!result ? `
+      <div class="card mb">
+        <textarea id="mix-input" class="form-input" rows="2" placeholder="Type your sentence using all the words above..." style="margin-bottom:8px"></textarea>
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="submitWordMixing()" style="flex:2">Submit</button>
+          <button class="btn btn-ghost" onclick="skipWordMixing()" style="flex:1">Skip</button>
+        </div>
+        <div id="mix-loading"></div>
+      </div>
+    ` : `
+      <div class="card mb">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-weight:700;font-size:14px;color:${result.rating==='Great'?'var(--green)':result.rating==='Good'?'var(--blue)':'var(--orange)'}">${result.rating === 'Great' ? '&#10003; Great!' : result.rating === 'Good' ? '&#10003; Good' : '&#10007; Needs Work'}</span>
+        </div>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:4px">Your sentence:</div>
+        <div style="font-size:14px;color:var(--text);margin-bottom:8px;font-style:italic">"${result.userSentence}"</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">${result.feedback.replace(/\n/g,'<br>')}</div>
+        ${result.example ? `<div style="font-size:12px;color:var(--green);margin-top:6px">Example: "${result.example}"</div>` : ''}
+      </div>
+      <button class="btn" onclick="nextWordMixing()">Next &#8594;</button>
+    `}`;
+  if(!result) setTimeout(()=>{const inp=document.getElementById('mix-input');if(inp)inp.focus()},100);
+}
+
+async function submitWordMixing(){
+  const inp = document.getElementById('mix-input');
+  if(!inp) return;
+  const userSentence = inp.value.trim();
+  if(!userSentence){ toast('Type a sentence first'); return; }
+  const loadEl = document.getElementById('mix-loading');
+  if(loadEl) loadEl.innerHTML = '<div class="ai-loading" style="margin-top:12px"><span></span><span></span><span></span></div><div style="font-size:11px;color:var(--text3);margin-top:4px">AI is evaluating...</div>';
+
+  const words = earState.rounds[earState.current];
+  const wordNames = words.map(w => w.word).join(', ');
+  const wordDefs = words.map(w => `"${w.word}" (${w.definition})`).join(', ');
+
+  const prompt = `Evaluate this Word Mixing exercise.
+
+The learner was asked to make ONE sentence using ALL these words: ${wordDefs}
+
+Learner's sentence: "${userSentence}"
+
+Check:
+1. Did the sentence use ALL the required words (${wordNames})? Inflected forms (past tense, plural, etc.) count.
+2. Is it grammatically correct?
+3. Does it make sense? Is the meaning of each word used correctly?
+4. Is it creative/natural?
+
+Reply in JSON: {"rating":"Great","feedback":"Brief feedback in English and Chinese","example":"A good example sentence using all the words","usedAll":true}
+rating = "Great" (all words used correctly, good grammar) / "Good" (all words used, minor issues) / "Needs Work" (missing words or major errors)`;
+
+  const result = await callGemini([{role:'user',text:prompt}],'You are a creative English writing coach for ESL learners in Canada. Be encouraging. Respond only with valid JSON.');
+  let evalData = { rating:'Needs Work', feedback:'Could not evaluate.', example:'', usedAll:false };
+  if(result){
+    try{
+      const cleaned = cleanGeminiText(result);
+      evalData = JSON.parse(cleaned);
+    }catch(e){ evalData.feedback = result; }
+  }
+  const isGood = evalData.rating === 'Great' || evalData.rating === 'Good';
+  if(isGood) earState.score++;
+  earState.results[earState.current] = { userSentence, rating:evalData.rating, feedback:evalData.feedback, example:evalData.example||'', words };
+
+  // SRS + XP for each word used
+  words.forEach(w => {
+    updateSRS(w.id, isGood ? 4 : 1, isGood ? 2 : 5);
+    awardXP('wordmixing', w.id, isGood ? 15 : 5);
+  });
+  recordActivity(isGood);
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function skipWordMixing(){
+  const words = earState.rounds[earState.current];
+  earState.results[earState.current] = { userSentence:'(skipped)', rating:'Needs Work', feedback:'Skipped', example:'', words };
+  words.forEach(w => {
+    updateSRS(w.id, 0, 10);
+  });
+  recordActivity(false);
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function nextWordMixing(){
+  earState.current++;
+  renderEarActive(document.getElementById('screen-ear'));
+}
+
+function renderWordMixingSummary(el){
+  earState.ended = true;
+  const total = earState.rounds.length;
+  const pct = total > 0 ? Math.round(earState.score / total * 100) : 0;
+  el.innerHTML = `
+    <div class="text-center" style="padding-top:40px">
+      <div style="font-size:48px;margin-bottom:8px">${pct>=80?'&#127942;':pct>=50?'&#128170;':'&#128256;'}</div>
+      <h2>Word Mixing Complete!</h2>
+      <p class="subtitle">${earState.score} / ${total} rated Good or Great (${pct}%)</p>
+    </div>
+    <div class="card mt" style="text-align:left">
+      ${earState.results.map((r,i)=>`<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:${r.rating==='Great'?'var(--green)':r.rating==='Good'?'var(--blue)':'var(--orange)'}">
+            ${r.rating}
+          </span>
+          <span style="font-size:11px;color:var(--accent2)">${r.words.map(w=>w.word).join(' + ')}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);font-style:italic;margin-top:2px">"${r.userSentence}"</div>
+      </div>`).join('')}
+    </div>
+    <button class="btn mt" onclick="earState=null;startWordMixing()">Play Again</button>
+    <button class="btn btn-ghost mt" onclick="earState=null;goTo('ear')">Ear Training</button>
+    <button class="btn btn-ghost mt" onclick="earState=null;goTo('home')">Home</button>`;
+}
+
+// ===== BRAIN SOAK (Chris Lonsdale - Passive Immersion) =====
+let brainSoakTimer = null;
+
+function startBrainSoak(){
+  const pool = WORDS.filter(w => w.example && w.example.length > 10);
+  if(pool.length < 3){ toast('Need at least 3 words with example sentences'); return; }
+  // Prioritize due/weak words, fill with others
+  const due = pool.filter(w => getDueWords().some(d => d.id === w.id));
+  const weak = pool.filter(w => {const s=getWordStatus(w.id); return s==='beginner'||s==='learning';});
+  const priority = [...new Map([...due,...weak].map(w=>[w.id,w])).values()];
+  const rest = pool.filter(w => !priority.find(p=>p.id===w.id));
+  shuffle(priority);
+  shuffle(rest);
+  const words = [...priority, ...rest].slice(0, 30);
+  earState = { mode:'brainsoak', words, current:0, paused:false, loop:true, speed:1, ended:false };
+  goTo('ear');
+  setTimeout(()=>brainSoakPlayNext(), 500);
+}
+
+function renderBrainSoak(el){
+  if(!earState || earState.ended){ renderEarTraining(el); return; }
+  const w = earState.current < earState.words.length ? earState.words[earState.current] : null;
+  const pct = earState.words.length > 0 ? Math.round((earState.current / earState.words.length) * 100) : 0;
+  const speedLabel = earState.speed === 0.7 ? 'Slow' : earState.speed === 1 ? 'Normal' : 'Fast';
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">&#127754; Brain Soak</h3>
+      <button onclick="stopBrainSoak()" style="background:none;border:none;color:var(--red);font-size:12px;font-weight:600;cursor:pointer">&#10005; Stop</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px;text-align:center">Passive immersion — just listen and absorb. No interaction needed.</div>
+    <div class="progress-bar" style="margin-bottom:8px"><div class="progress-fill" style="width:${pct}%"></div></div>
+    <div style="text-align:center;font-size:12px;color:var(--text3);margin-bottom:16px">${earState.current + 1} / ${earState.words.length}${earState.loop ? ' (looping)' : ''}</div>
+    ${w ? `
+    <div class="card text-center mb" style="min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center">
+      <div style="font-size:13px;color:var(--accent2);margin-bottom:8px">${w.word}</div>
+      <div style="font-size:18px;font-weight:600;color:var(--text);line-height:1.6;padding:0 8px">"${w.example}"</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:8px">${w.definition}</div>
+    </div>
+    ` : `
+    <div class="card text-center mb" style="min-height:180px;display:flex;align-items:center;justify-content:center">
+      <div style="font-size:16px;color:var(--text2)">Preparing...</div>
+    </div>
+    `}
+    <div style="display:flex;gap:8px;justify-content:center;align-items:center;margin-bottom:12px">
+      <button class="btn btn-sm btn-ghost" onclick="brainSoakSkip(-1)" style="width:44px;height:44px;padding:0;font-size:18px">&#9664;</button>
+      <button class="btn btn-sm" onclick="toggleBrainSoakPause()" style="width:60px;height:44px;padding:0;font-size:20px">${earState.paused ? '&#9654;' : '&#10074;&#10074;'}</button>
+      <button class="btn btn-sm btn-ghost" onclick="brainSoakSkip(1)" style="width:44px;height:44px;padding:0;font-size:18px">&#9654;</button>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:center;margin-bottom:8px">
+      <button class="btn btn-sm btn-ghost" onclick="setBrainSoakSpeed(0.7)" style="width:auto;padding:4px 12px;font-size:11px;${earState.speed===0.7?'border-color:var(--accent);color:var(--accent)':''}">Slow</button>
+      <button class="btn btn-sm btn-ghost" onclick="setBrainSoakSpeed(1)" style="width:auto;padding:4px 12px;font-size:11px;${earState.speed===1?'border-color:var(--accent);color:var(--accent)':''}">Normal</button>
+      <button class="btn btn-sm btn-ghost" onclick="setBrainSoakSpeed(1.2)" style="width:auto;padding:4px 12px;font-size:11px;${earState.speed===1.2?'border-color:var(--accent);color:var(--accent)':''}">Fast</button>
+      <button class="btn btn-sm btn-ghost" onclick="toggleBrainSoakLoop()" style="width:auto;padding:4px 12px;font-size:11px;${earState.loop?'border-color:var(--green);color:var(--green)':''}">&#128257; ${earState.loop?'Loop ON':'Loop OFF'}</button>
+    </div>`;
+}
+
+function brainSoakPlayNext(){
+  if(!earState || earState.paused || earState.mode !== 'brainsoak') return;
+  if(earState.current >= earState.words.length){
+    if(earState.loop){
+      earState.current = 0;
+    } else {
+      earState.ended = true;
+      toast('Brain Soak complete!');
+      renderEarActive(document.getElementById('screen-ear'));
+      return;
+    }
+  }
+  const w = earState.words[earState.current];
+  renderBrainSoak(document.getElementById('screen-ear'));
+
+  // Passive XP for exposure
+  awardXP('brainsoak', w.id, 3);
+
+  // Play the example sentence at the selected speed
+  speak(w.example, earState.speed);
+  const duration = getSpokenDuration(w.example) / earState.speed;
+
+  // After the sentence, pause, then repeat at slower speed, then move on
+  brainSoakTimer = setTimeout(()=>{
+    if(!earState || earState.paused || earState.mode !== 'brainsoak') return;
+    // Repeat the same sentence slightly slower for reinforcement
+    const repeatSpeed = Math.max(0.6, earState.speed - 0.2);
+    speak(w.example, repeatSpeed);
+    const repeatDuration = getSpokenDuration(w.example) / repeatSpeed;
+    brainSoakTimer = setTimeout(()=>{
+      if(!earState || earState.paused || earState.mode !== 'brainsoak') return;
+      earState.current++;
+      brainSoakPlayNext();
+    }, repeatDuration + 1500); // gap between sentences
+  }, duration + 1000); // pause between first and repeat
+}
+
+function toggleBrainSoakPause(){
+  if(!earState) return;
+  earState.paused = !earState.paused;
+  if(earState.paused){
+    if(brainSoakTimer) clearTimeout(brainSoakTimer);
+    brainSoakTimer = null;
+    window.speechSynthesis && window.speechSynthesis.cancel();
+    if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  } else {
+    brainSoakPlayNext();
+  }
+  renderBrainSoak(document.getElementById('screen-ear'));
+}
+
+function brainSoakSkip(dir){
+  if(!earState) return;
+  if(brainSoakTimer) clearTimeout(brainSoakTimer);
+  brainSoakTimer = null;
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  earState.current += dir;
+  if(earState.current < 0) earState.current = 0;
+  if(earState.current >= earState.words.length){
+    if(earState.loop) earState.current = 0;
+    else { earState.current = earState.words.length - 1; }
+  }
+  if(!earState.paused) brainSoakPlayNext();
+  else renderBrainSoak(document.getElementById('screen-ear'));
+}
+
+function setBrainSoakSpeed(speed){
+  if(!earState) return;
+  earState.speed = speed;
+  renderBrainSoak(document.getElementById('screen-ear'));
+}
+
+function toggleBrainSoakLoop(){
+  if(!earState) return;
+  earState.loop = !earState.loop;
+  renderBrainSoak(document.getElementById('screen-ear'));
+}
+
+function stopBrainSoak(){
+  if(brainSoakTimer) clearTimeout(brainSoakTimer);
+  brainSoakTimer = null;
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  earState = null;
+  goTo('ear');
 }
 
 // ===== INIT =====
