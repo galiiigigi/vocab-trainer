@@ -305,6 +305,8 @@ textarea.form-input{min-height:60px;resize:vertical}
 <body>
 <div class="app" id="app">
   <div class="screen active" id="screen-home"></div>
+  <div class="screen" id="screen-output"></div>
+  <div class="screen" id="screen-input"></div>
   <div class="screen" id="screen-quiz"></div>
   <div class="screen" id="screen-cards"></div>
   <div class="screen" id="screen-voice"></div>
@@ -317,8 +319,8 @@ textarea.form-input{min-height:60px;resize:vertical}
   <div class="screen" id="screen-settings"></div>
   <nav class="nav"><div class="nav-inner">
     <button class="nav-btn active" onclick="goTo('home')"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>Home</span></button>
-    <button class="nav-btn" onclick="goTo('quiz')"><svg viewBox="0 0 24 24"><path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/></svg><span>Quiz</span></button>
-    <button class="nav-btn" onclick="goTo('cards')"><svg viewBox="0 0 24 24"><path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1z"/></svg><span>Cards</span></button>
+    <button class="nav-btn" onclick="goTo('output')"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg><span>Output</span></button>
+    <button class="nav-btn" onclick="goTo('input')"><svg viewBox="0 0 24 24"><path d="M12 3v9.28a4.39 4.39 0 00-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z"/></svg><span>Input</span></button>
     <button class="nav-btn" onclick="goTo('words')"><svg viewBox="0 0 24 24"><path d="M3 18h12v-2H3v2zM3 6v2h18V6H3zm0 7h18v-2H3v2z"/></svg><span>Words</span></button>
     <button class="nav-btn" onclick="goTo('settings')"><svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.6 3.6 0 0112 15.6z"/></svg><span>Settings</span></button>
   </div></nav>
@@ -996,8 +998,11 @@ function goTo(screen){
   if(el) el.classList.add('active');
   // Highlight nav
   const navBtns = document.querySelectorAll('.nav-btn');
-  const map = {home:0,quiz:1,cards:2,words:3,stats:4};
-  if(map[screen] !== undefined && navBtns[map[screen]]) navBtns[map[screen]].classList.add('active');
+  const map = {home:0,output:1,input:2,words:3,settings:4};
+  // Sub-screens highlight their parent tab
+  const parentMap = {chat:1,voice:1,ear:1,quiz:3,cards:3,addwords:3,pretest:3};
+  const navIdx = map[screen] !== undefined ? map[screen] : parentMap[screen];
+  if(navIdx !== undefined && navBtns[navIdx]) navBtns[navIdx].classList.add('active');
   renderScreen(screen);
 }
 
@@ -1006,6 +1011,8 @@ function renderScreen(screen){
   const el = document.getElementById('screen-'+screen);
   switch(screen){
     case 'home': renderHome(el); break;
+    case 'output': renderOutputScreen(el); break;
+    case 'input': renderInputScreen(el); break;
     case 'quiz': renderQuizStart(el); break;
     case 'cards': renderFlashcardStart(el); break;
     case 'words': renderWordList(el); break;
@@ -1017,6 +1024,91 @@ function renderScreen(screen){
     case 'ear': renderEarTraining(el); break;
     case 'settings': renderSettings(el); break;
   }
+}
+
+// ===== OUTPUT SCREEN =====
+function renderOutputScreen(el){
+  // If there's an active chat or ear session, render that instead
+  if(chatState && !chatState.ended){ goTo('chat'); return; }
+  if(earState && !earState.ended && ['shadowing','listenrespond','wordmixing','subdrill'].includes(earState.mode)){ goTo('ear'); return; }
+  const hasKey = !!state.settings.apiKey;
+  el.innerHTML = `
+    <h2 style="margin-bottom:4px">Output</h2>
+    <p class="subtitle" style="margin-bottom:16px">Practice producing English — speaking & writing</p>
+
+    <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Conversation</div>
+    <div class="card mb" style="border:2px solid var(--green);background:linear-gradient(135deg,var(--bg2),rgba(0,184,148,.08));cursor:pointer" onclick="startLanguageParent()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#129303;</span>
+        <div>
+          <h3 style="margin:0;color:var(--green)">Language Parent</h3>
+          <p style="font-size:12px;color:var(--text2);margin:2px 0 0">Safe, simple chats — rephrases instead of correcting</p>
+        </div>
+      </div>
+    </div>
+    <div class="card mb" style="border:2px solid var(--accent);background:linear-gradient(135deg,var(--bg2),rgba(108,92,231,.08));cursor:pointer" onclick="startFreeChat()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#128172;</span>
+        <div>
+          <h3 style="margin:0;color:var(--accent2)">Free Chat</h3>
+          <p style="font-size:12px;color:var(--text2);margin:2px 0 0">Chat about anything with bilingual grammar correction</p>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+      <button class="btn btn-sm btn-ghost" onclick="goTo('chat')" style="justify-content:flex-start;text-align:left">&#10022; All Scenarios <span style="font-size:11px;color:var(--text3);margin-left:auto">Role-play situations</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startChat('softener')" style="justify-content:flex-start;text-align:left">&#128172; Softener Practice <span style="font-size:11px;color:var(--text3);margin-left:auto">Polite phrasing</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startChat('star')" style="justify-content:flex-start;text-align:left">&#127775; STAR Interview <span style="font-size:11px;color:var(--text3);margin-left:auto">Behavioral answers</span></button>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Drills</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+      <button class="btn btn-sm btn-ghost" onclick="startWordMixing()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128256; Word Mixing <span style="font-size:11px;color:var(--text3);margin-left:auto">Combine words into sentences</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startSubDrill()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128260; Substitution Drill <span style="font-size:11px;color:var(--text3);margin-left:auto">FSI-style word replacement</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startListenRespond()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#127908; Listen & Respond <span style="font-size:11px;color:var(--text3);margin-left:auto">Pimsleur-style speak back</span></button>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Speaking</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <button class="btn btn-sm btn-ghost" onclick="startEarShadowing()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128483; Shadowing <span style="font-size:11px;color:var(--text3);margin-left:auto">Listen & repeat with AI feedback</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startVoice()" style="justify-content:flex-start;text-align:left">&#127908; Voice Test <span style="font-size:11px;color:var(--text3);margin-left:auto">Say the word, check recognition</span></button>
+    </div>
+    ${!hasKey?'<div style="font-size:11px;color:var(--orange);margin-top:12px;text-align:center">Some modes require a Gemini API key in Settings</div>':''}`;
+}
+
+// ===== INPUT SCREEN =====
+function renderInputScreen(el){
+  // If there's an active ear session for input modes, render that
+  if(earState && !earState.ended && ['brainsoak','dictation','pairs','listening'].includes(earState.mode)){ goTo('ear'); return; }
+  const hasKey = !!state.settings.apiKey;
+  el.innerHTML = `
+    <h2 style="margin-bottom:4px">Input</h2>
+    <p class="subtitle" style="margin-bottom:16px">Absorb English — listening & comprehension</p>
+
+    <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Passive Immersion</div>
+    <div class="card mb" style="border:2px solid var(--green);background:linear-gradient(135deg,var(--bg2),rgba(0,184,148,.08));cursor:pointer" onclick="startBrainSoak()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#127754;</span>
+        <div>
+          <h3 style="margin:0;color:var(--green)">Brain Soak</h3>
+          <p style="font-size:12px;color:var(--text2);margin:2px 0 0">Sentences on loop — commute, cook, relax</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Active Listening</div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+      <button class="btn btn-sm btn-ghost" onclick="startAudioQuiz()" style="justify-content:flex-start;text-align:left">&#127911; Audio Quiz <span style="font-size:11px;color:var(--text3);margin-left:auto">Listen-only multiple choice</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startListeningFlashcards()" style="justify-content:flex-start;text-align:left">&#127911; Listen Cards <span style="font-size:11px;color:var(--text3);margin-left:auto">Audio front, flip to reveal</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startEarListening()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#127897; Listening Comprehension <span style="font-size:11px;color:var(--text3);margin-left:auto">Passage + questions</span></button>
+    </div>
+
+    <div style="font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Ear Training</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <button class="btn btn-sm btn-ghost" onclick="startEarDictation()" style="justify-content:flex-start;text-align:left">&#9997; Dictation <span style="font-size:11px;color:var(--text3);margin-left:auto">Type what you hear</span></button>
+      <button class="btn btn-sm btn-ghost" onclick="startEarMinimalPairs()" style="justify-content:flex-start;text-align:left">&#128066; Minimal Pairs <span style="font-size:11px;color:var(--text3);margin-left:auto">Which word did you hear?</span></button>
+    </div>
+    ${!hasKey?'<div style="font-size:11px;color:var(--orange);margin-top:12px;text-align:center">Some modes require a Gemini API key in Settings</div>':''}`;
 }
 
 // ===== DAILY WORD =====
@@ -1032,68 +1124,80 @@ function getDailyWord(){
 // ===== HOME =====
 function renderHome(el){
   const due = getDueWords().length;
-  const newW = getNewWords().length;
-  const active = WORDS;
-  const learned = active.filter(w => getWordStatus(w.id)==='mastered').length;
-  const familiar = active.filter(w => getWordStatus(w.id)==='familiar').length;
-  const learning = active.filter(w => {const s=getWordStatus(w.id); return s==='learning'||s==='beginner';}).length;
   const todayData = state.dailyActivity[todayKey()] || {reviewed:0,correct:0};
   const acc = todayData.reviewed > 0 ? Math.round(todayData.correct/todayData.reviewed*100) : 0;
   const todayXP = (state.xp && state.xp.dailyXP && state.xp.dailyXP[todayKey()]) || 0;
 
   // CEFR Level
   const cefrProg = getCEFRProgress();
-  const skills = getSkillLevels();
   const cefrColor = cefrProg.current.color;
-  const targetLv = CEFR_LEVELS.find(l => l.level === (state.settings.targetLevel || 'B2'));
 
-  const dailyWord = getDailyWord();
+  // Smart recommendation
+  const hour = new Date().getHours();
+  let recText, recAction, recBtn;
+  if(WORDS.length === 0){
+    recText = 'Welcome! Start by adding some words to your library.';
+    recAction = "goTo('pretest')"; recBtn = 'Take Assessment';
+  } else if(todayXP === 0 && state.streak > 0){
+    recText = state.streak + ' day streak! Keep it going — try a quick chat.';
+    recAction = 'startLanguageParent()'; recBtn = 'Start Chat';
+  } else if(todayXP === 0 && hour < 12){
+    recText = 'Good morning! Start your day with a Language Parent chat.';
+    recAction = 'startLanguageParent()'; recBtn = 'Start Chat';
+  } else if(todayXP === 0){
+    recText = 'Ready to practice? A 10-minute conversation goes a long way.';
+    recAction = 'startLanguageParent()'; recBtn = 'Start Chat';
+  } else if(todayXP > 0 && todayXP < 50){
+    recText = 'Nice start! Try some passive listening to keep absorbing.';
+    recAction = 'startBrainSoak()'; recBtn = 'Brain Soak';
+  } else if(todayXP >= 50 && todayXP < 150){
+    recText = 'Great session! Challenge yourself with a drill.';
+    recAction = 'startWordMixing()'; recBtn = 'Word Mixing';
+  } else {
+    recText = 'Amazing progress today! ' + todayXP + ' XP earned. Keep it up!';
+    recAction = 'startFreeChat()'; recBtn = 'Free Chat';
+  }
+
   el.innerHTML = `
-    <div class="card mb" onclick="goTo('stats')" style="cursor:pointer;padding:16px">
-      <div class="level-header">
-        <div class="level-badge" style="background:linear-gradient(135deg,${cefrColor},${cefrColor}cc)">${cefrProg.current.level}</div>
-        <div class="level-info">
-          <div class="level-title">${cefrProg.current.label} Speaker</div>
-          <div class="level-subtitle">CEFR ${cefrProg.current.level} · ≈ IELTS ${cefrProg.current.ielts}${targetLv ? ' · Target: ' + targetLv.level : ''}</div>
-          <div class="xp-bar"><div class="xp-fill" style="width:${cefrProg.pct}%;background:linear-gradient(90deg,${cefrColor},${cefrColor}99)"></div></div>
-          <div class="xp-text"><span>${state.xp.total.toLocaleString()} XP</span>${cefrProg.next ? '<span>' + cefrProg.xpNeeded.toLocaleString() + ' XP to ' + cefrProg.next.level + '</span>' : '<span>Max level!</span>'}</div>
+    <div class="card card-sm mb" onclick="goTo('stats')" style="cursor:pointer;display:flex;align-items:center;gap:12px;padding:12px 16px">
+      <div class="level-badge" style="background:linear-gradient(135deg,${cefrColor},${cefrColor}cc);width:40px;height:40px;font-size:16px;display:flex;align-items:center;justify-content:center;border-radius:10px;font-weight:800;color:#fff;flex-shrink:0">${cefrProg.current.level}</div>
+      <div style="flex:1;min-width:0">
+        <div class="xp-bar" style="margin-bottom:4px"><div class="xp-fill" style="width:${cefrProg.pct}%;background:linear-gradient(90deg,${cefrColor},${cefrColor}99)"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3)">
+          <span>${state.xp.total.toLocaleString()} XP</span>
+          <span>${cefrProg.next ? cefrProg.xpNeeded.toLocaleString() + ' to ' + cefrProg.next.level : 'Max!'}</span>
         </div>
       </div>
-      <div class="skill-grid">
-        <div class="skill-box"><div class="skill-emoji">&#128214;</div><div class="skill-name">Vocab</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.vocab)||{}).color||'#fff'}">${skills.vocab}</div></div>
-        <div class="skill-box"><div class="skill-emoji">&#128483;</div><div class="skill-name">Speaking</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.speaking)||{}).color||'#fff'}">${skills.speaking}</div></div>
-        <div class="skill-box"><div class="skill-emoji">&#128066;</div><div class="skill-name">Listening</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.listening)||{}).color||'#fff'}">${skills.listening}</div></div>
-        <div class="skill-box"><div class="skill-emoji">&#128221;</div><div class="skill-name">Drills</div><div class="skill-val" style="color:${(CEFR_LEVELS.find(l=>l.level===skills.drills)||{}).color||'#fff'}">${skills.drills}</div></div>
+      <div style="display:flex;gap:12px;flex-shrink:0;font-size:12px;font-weight:700">
+        <div style="text-align:center"><div style="color:var(--accent)">${todayXP}</div><div style="font-size:9px;color:var(--text3);font-weight:400">XP</div></div>
+        <div style="text-align:center"><div style="color:var(--orange)">${state.streak > 0 ? state.streak : 0}</div><div style="font-size:9px;color:var(--text3);font-weight:400">Streak</div></div>
       </div>
     </div>
+
+    <div class="card mb" style="background:linear-gradient(135deg,var(--bg2),rgba(108,92,231,.06));border:1px solid var(--accent);padding:16px">
+      <div style="font-size:14px;color:var(--text);margin-bottom:10px">${recText}</div>
+      <button class="btn btn-sm" onclick="${recAction}" style="width:auto;padding:8px 24px">${recBtn}</button>
+    </div>
+
     <div style="display:flex;gap:8px;margin-bottom:12px">
-      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--accent)">${todayXP}</div><div style="font-size:10px;color:var(--text3)">Today XP</div></div>
-      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--orange)">${state.streak > 0 ? state.streak : 0}</div><div style="font-size:10px;color:var(--text3)">Streak</div></div>
-      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--green)">${learned}</div><div style="font-size:10px;color:var(--text3)">Mastered</div></div>
-      <div class="card card-sm" style="flex:1;text-align:center;padding:10px"><div style="font-size:18px;font-weight:800;color:var(--blue)">${acc}%</div><div style="font-size:10px;color:var(--text3)">Accuracy</div></div>
+      <button class="btn" style="flex:1;background:linear-gradient(135deg,var(--green),#00d2a0)" onclick="goTo('output')">&#128483; Output</button>
+      <button class="btn" style="flex:1;background:linear-gradient(135deg,var(--blue),#0984e3)" onclick="goTo('input')">&#127911; Input</button>
     </div>
-    ${dailyWord ? `<div class="daily-word" onclick="showWordDetail(${dailyWord.id})">
-      <div class="daily-word-label">Word of the Moment</div>
-      <div class="daily-word-text">${dailyWord.word} <button class="speak-btn" onclick="event.stopPropagation();speak('${dailyWord.word.replace(/'/g,"\\'")}')" style="font-size:18px">&#128264;</button></div>
-      <div class="daily-word-def">${dailyWord.definition}</div>
-      ${dailyWord.example?'<div style="font-size:12px;color:var(--text3);font-style:italic;margin-top:4px">&quot;'+dailyWord.example+'&quot;</div>':''}
-    </div>` : ''}
-    ${due > 0 ? `<div class="card card-sm mb" style="text-align:center"><span style="font-size:20px;font-weight:700;color:var(--accent2)">${due}</span> <span style="font-size:13px;color:var(--text3)">words due for review</span></div>` : ''}
-    ${todayData.reviewed > 0 ? `<div class="card card-sm mb"><div style="display:flex;justify-content:space-between;font-size:13px">
-      <span>Today: ${todayData.reviewed} reviewed</span><span>${WORDS.length} words total</span></div></div>` : ''}
-    ${WORDS.length === 0 ? `<div class="card mb" style="text-align:center;border:1px dashed var(--accent);padding:20px">
-      <div style="font-size:14px;color:var(--text2);margin-bottom:8px">Your library is empty. Get started!</div>
-      <button class="btn btn-sm mb" onclick="goTo('pretest')">&#128218; Take Vocabulary Assessment</button>
-      <button class="btn btn-ghost btn-sm" onclick="goTo('words')">Import Word Pack</button>
-    </div>` : `${due > 0 ? `<button class="btn mb" onclick="startQuiz()" style="position:relative">${due} words due &mdash; Start Review</button>` : ''}`}
-    <div class="home-actions" style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn" style="background:linear-gradient(135deg,var(--green),#00d2a0)" onclick="startLanguageParent()">&#129303; Language Parent</button>
-      <button class="btn" style="background:linear-gradient(135deg,var(--accent),#a29bfe)" onclick="startFreeChat()">&#128172; Free Chat</button>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-ghost" style="flex:1" onclick="startBrainSoak()">&#127754; Brain Soak</button>
-        <button class="btn btn-ghost" style="flex:1" onclick="startListenRespond()">&#127908; Listen & Respond</button>
+
+    ${todayData.reviewed > 0 || todayXP > 0 ? `<div class="card card-sm mb" style="padding:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text3)">
+        <span>Today: ${todayData.reviewed} reviewed · ${todayXP} XP</span>
+        <span>${acc}% accuracy</span>
       </div>
-      <button class="btn btn-ghost" onclick="showPracticeHub()" style="border:1px dashed var(--accent);color:var(--accent2);font-size:14px">&#9776; All Practice Modes</button>
+    </div>` : ''}
+
+    <div onclick="goTo('words')" class="card card-sm" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:10px 16px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">&#128218;</span>
+        <span style="font-size:13px;font-weight:600">My Words</span>
+        <span style="font-size:12px;color:var(--text3)">${WORDS.length} words</span>
+      </div>
+      ${due > 0 ? '<span style="font-size:12px;color:var(--accent2);font-weight:600">' + due + ' due</span>' : '<span style="font-size:12px;color:var(--text3)">&#8250;</span>'}
     </div>`;
 }
 
@@ -1938,8 +2042,14 @@ let wordFilter = 'all';
 let wordSearch = '';
 function renderWordList(el){
   const cats = ['all', ...Object.keys(CATEGORIES)];
+  const dueCount = getDueWords().length;
   el.innerHTML = `
-    <h2>Word List</h2>
+    <h2>My Words</h2>
+    ${WORDS.length > 0 ? `<div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-sm" style="flex:1" onclick="startQuiz()" ${dueCount===0?'disabled':''}>&#9997; Quiz${dueCount > 0 ? ' (' + dueCount + ' due)' : ''}</button>
+      <button class="btn btn-sm btn-ghost" style="flex:1" onclick="goTo('cards')">&#128195; Flashcards</button>
+      <button class="btn btn-sm btn-ghost" style="flex:1" onclick="startVoice()">&#127908; Voice</button>
+    </div>` : ''}
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <button class="btn btn-sm btn-ghost" style="flex:1" onclick="goTo('addwords')">+ Add Words</button>
       <button class="btn btn-sm btn-ghost" style="flex:1" onclick="goTo('pretest')">Get Word Packs</button>
@@ -3465,60 +3575,8 @@ let earState = null;
 
 function renderEarTraining(el){
   if(earState && !earState.ended){ renderEarActive(el); return; }
-  const hasKey = !!state.settings.apiKey;
-  el.innerHTML = `
-    <h2>&#127911; Ear Training</h2>
-    <p class="subtitle">Train your listening skills with vocabulary words</p>
-    ${!hasKey?'<div class="card card-sm mb" style="border:1px solid var(--orange)"><div style="font-size:13px;color:var(--orange)">&#9888; Listening Comprehension requires a Gemini API key in <a href="#" onclick="goTo(\'settings\');return false" style="color:var(--accent2)">Settings</a></div></div>':''}
-    <div class="card mb" onclick="startEarDictation()" style="cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#9997;</span>
-        <div><h3 style="margin:0">Dictation</h3><p style="font-size:12px;color:var(--text3);margin:0">Listen to a sentence and type what you hear</p></div>
-      </div>
-    </div>
-    <div class="card mb" onclick="startEarMinimalPairs()" style="cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#128066;</span>
-        <div><h3 style="margin:0">Minimal Pairs</h3><p style="font-size:12px;color:var(--text3);margin:0">Which word did you hear? Train similar sounds</p></div>
-      </div>
-    </div>
-    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startEarShadowing()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#128483;</span>
-        <div><h3 style="margin:0">Shadowing / Repeat</h3><p style="font-size:12px;color:var(--text3);margin:0">Listen to a sentence, repeat it, get AI pronunciation feedback</p></div>
-      </div>
-    </div>
-    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startEarListening()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#127897;</span>
-        <div><h3 style="margin:0">Listening Comprehension</h3><p style="font-size:12px;color:var(--text3);margin:0">Listen to a passage and answer questions (AI)</p></div>
-      </div>
-    </div>
-    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startSubDrill()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#128260;</span>
-        <div><h3 style="margin:0">Substitution Drill (FSI)</h3><p style="font-size:12px;color:var(--text3);margin:0">Replace words in sentences to build flexibility</p></div>
-      </div>
-    </div>
-    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startListenRespond()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#127908;</span>
-        <div><h3 style="margin:0">Listen & Respond (Pimsleur)</h3><p style="font-size:12px;color:var(--text3);margin:0">Hear a prompt, think, then respond by voice</p></div>
-      </div>
-    </div>
-    <div class="card mb ${!hasKey?'disabled':''}" onclick="${hasKey?'startWordMixing()':'toast(\'Add API key first\')'}" style="cursor:pointer;${!hasKey?'opacity:.5':''}">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#128256;</span>
-        <div><h3 style="margin:0">Word Mixing (Lonsdale)</h3><p style="font-size:12px;color:var(--text3);margin:0">Combine 2-3 known words into creative sentences</p></div>
-      </div>
-    </div>
-    <div class="card mb" onclick="startBrainSoak()" style="cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:28px">&#127754;</span>
-        <div><h3 style="margin:0">Brain Soak</h3><p style="font-size:12px;color:var(--text3);margin:0">Passive immersion — listen to sentences on loop while you relax</p></div>
-      </div>
-    </div>
-    <button class="btn btn-ghost mt" onclick="goTo('home')">Back to Home</button>`;
+  // No active session — redirect to appropriate tab
+  goTo('home');
 }
 
 // --- Dictation Mode ---
@@ -5662,7 +5720,7 @@ function renderChatStart(el){
         </div>
       </div>`).join('')}
     </div>
-    <button class="btn btn-ghost mt" onclick="goTo('home')">Back to Home</button>`;
+    <button class="btn btn-ghost mt" onclick="goTo('output')">Back to Output</button>`;
 }
 
 function renderChat(el, loading){
@@ -6174,59 +6232,6 @@ function checkNotificationTime(){
   }
 }
 
-// ===== PRACTICE HUB =====
-function showPracticeHub(){
-  const hasKey = !!state.settings.apiKey;
-  const root = document.getElementById('modal-root');
-  root.innerHTML = `
-    <div style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto" onclick="if(event.target===this)this.innerHTML=''">
-      <div style="background:var(--bg2);border-radius:var(--radius);padding:20px;max-width:440px;width:100%;margin-top:20px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <h2 style="margin:0;font-size:18px">All Practice Modes</h2>
-          <button onclick="document.getElementById('modal-root').innerHTML=''" style="background:none;border:none;color:var(--text3);font-size:22px;cursor:pointer">&times;</button>
-        </div>
-
-        <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Conversation</div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startLanguageParent()" style="justify-content:flex-start;text-align:left">&#129303; Language Parent <span style="font-size:11px;color:var(--text3);margin-left:auto">Safe, simple chats</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startFreeChat()" style="justify-content:flex-start;text-align:left">&#128172; Free Chat <span style="font-size:11px;color:var(--text3);margin-left:auto">Grammar correction</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();goTo('chat')" style="justify-content:flex-start;text-align:left">&#10022; Scenarios <span style="font-size:11px;color:var(--text3);margin-left:auto">Role-play situations</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startChat('softener')" style="justify-content:flex-start;text-align:left">&#128172; Softener Practice <span style="font-size:11px;color:var(--text3);margin-left:auto">Polite phrasing</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startChat('star')" style="justify-content:flex-start;text-align:left">&#127775; STAR Interview <span style="font-size:11px;color:var(--text3);margin-left:auto">Behavioral answers</span></button>
-        </div>
-
-        <div style="font-size:12px;font-weight:700;color:var(--orange);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Drills</div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startWordMixing()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128256; Word Mixing <span style="font-size:11px;color:var(--text3);margin-left:auto">Combine words creatively</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startSubDrill()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128260; Substitution Drill <span style="font-size:11px;color:var(--text3);margin-left:auto">FSI-style replace words</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startListenRespond()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#127908; Listen & Respond <span style="font-size:11px;color:var(--text3);margin-left:auto">Pimsleur-style speak</span></button>
-        </div>
-
-        <div style="font-size:12px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Listening</div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startBrainSoak()" style="justify-content:flex-start;text-align:left">&#127754; Brain Soak <span style="font-size:11px;color:var(--text3);margin-left:auto">Passive immersion</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarShadowing()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#128483; Shadowing <span style="font-size:11px;color:var(--text3);margin-left:auto">Repeat after AI</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarDictation()" style="justify-content:flex-start;text-align:left">&#9997; Dictation <span style="font-size:11px;color:var(--text3);margin-left:auto">Type what you hear</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarMinimalPairs()" style="justify-content:flex-start;text-align:left">&#128066; Minimal Pairs <span style="font-size:11px;color:var(--text3);margin-left:auto">Similar sounds</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startEarListening()" ${!hasKey?'disabled':''} style="justify-content:flex-start;text-align:left">&#127897; Listening Comprehension <span style="font-size:11px;color:var(--text3);margin-left:auto">Passage + questions</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startAudioQuiz()" style="justify-content:flex-start;text-align:left">&#127911; Audio Quiz <span style="font-size:11px;color:var(--text3);margin-left:auto">Listen-only quiz</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startListeningFlashcards()" style="justify-content:flex-start;text-align:left">&#127911; Listen Cards <span style="font-size:11px;color:var(--text3);margin-left:auto">Audio-only flashcards</span></button>
-        </div>
-
-        <div style="font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Vocabulary</div>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startQuiz()" style="justify-content:flex-start;text-align:left">&#9997; Quiz <span style="font-size:11px;color:var(--text3);margin-left:auto">Multiple choice</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();goTo('cards')" style="justify-content:flex-start;text-align:left">&#128195; Flashcards <span style="font-size:11px;color:var(--text3);margin-left:auto">Flip & rate</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();startVoice()" style="justify-content:flex-start;text-align:left">&#127908; Voice Test <span style="font-size:11px;color:var(--text3);margin-left:auto">Say the word</span></button>
-          <button class="btn btn-sm btn-ghost" onclick="closePracticeHub();goTo('pretest')" style="justify-content:flex-start;text-align:left">&#128218; Placement Test <span style="font-size:11px;color:var(--text3);margin-left:auto">AI assessment</span></button>
-        </div>
-      </div>
-    </div>`;
-}
-
-function closePracticeHub(){
-  document.getElementById('modal-root').innerHTML = '';
-}
 
 // ===== LANGUAGE PARENT CHAT (Chris Lonsdale) =====
 function startLanguageParent(){
