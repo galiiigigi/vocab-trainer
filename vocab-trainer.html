@@ -911,6 +911,71 @@ function testGoogleTTS(){
   googleSpeak('Hello! Welcome to Canada, how are you doing today?', null, true);
 }
 
+// ===== BACKGROUND PLAYBACK (Media Session + Audio Keepalive) =====
+// Tiny silent MP3 (~200 bytes) to keep audio session alive when screen is off
+const SILENT_MP3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwBHAAAAAAD/+1DEAAAHAAGf9AAAIgAAM/8AAABMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/7UMQfA8AAAaQAAAAAAAA0gAAABFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==';
+let bgKeepAlive = null;
+let bgPlaybackMode = null; // 'autoplay' | 'brainsoak' | null
+
+function enableBackgroundPlayback(mode, wordText, detail){
+  bgPlaybackMode = mode;
+  // Start silent audio loop to keep audio session alive
+  if(!bgKeepAlive){
+    bgKeepAlive = new Audio(SILENT_MP3);
+    bgKeepAlive.loop = true;
+    bgKeepAlive.volume = 0.01; // near-silent
+    bgKeepAlive.play().catch(()=>{});
+  }
+  updateMediaSession(wordText, detail);
+}
+
+function disableBackgroundPlayback(){
+  bgPlaybackMode = null;
+  if(bgKeepAlive){ bgKeepAlive.pause(); bgKeepAlive = null; }
+  if('mediaSession' in navigator){
+    navigator.mediaSession.metadata = null;
+    navigator.mediaSession.playbackState = 'none';
+    // Remove handlers
+    ['play','pause','nexttrack','previoustrack'].forEach(a => {
+      try{ navigator.mediaSession.setActionHandler(a, null); }catch(e){}
+    });
+  }
+}
+
+function updateMediaSession(title, detail){
+  if(!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: title || 'Vocab Trainer',
+    artist: detail || 'Background Playback',
+    album: bgPlaybackMode === 'brainsoak' ? 'Brain Soak' : 'Auto-Play'
+  });
+  navigator.mediaSession.playbackState = 'playing';
+  // Action handlers
+  const isBS = bgPlaybackMode === 'brainsoak';
+  navigator.mediaSession.setActionHandler('play', () => {
+    if(isBS) toggleBrainSoakPause();
+    else toggleAutoPlayPause();
+  });
+  navigator.mediaSession.setActionHandler('pause', () => {
+    if(isBS) toggleBrainSoakPause();
+    else toggleAutoPlayPause();
+  });
+  navigator.mediaSession.setActionHandler('nexttrack', () => {
+    if(isBS) brainSoakSkip(1);
+    else autoPlaySkip(1);
+  });
+  navigator.mediaSession.setActionHandler('previoustrack', () => {
+    if(isBS) brainSoakSkip(-1);
+    else autoPlaySkip(-1);
+  });
+}
+
+function updateMediaSessionPaused(paused){
+  if('mediaSession' in navigator){
+    navigator.mediaSession.playbackState = paused ? 'paused' : 'playing';
+  }
+}
+
 async function testGeminiKey(){
   const key = state.settings.apiKey;
   if(!key){ toast('Add your API key first'); return; }
@@ -2116,6 +2181,7 @@ function startAutoPlay(){
   const words = getFilteredWords();
   if(!words.length){ toast('No words to play'); return; }
   autoPlayState = { words, current:0, phase:'word', paused:false };
+  enableBackgroundPlayback('autoplay', words[0]?.word, words[0]?.definition);
   renderAutoPlayBar();
   autoPlayNext();
 }
@@ -2126,6 +2192,7 @@ function stopAutoPlay(){
   autoPlayState = null;
   window.speechSynthesis && window.speechSynthesis.cancel();
   if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  disableBackgroundPlayback();
   renderAutoPlayBar();
 }
 
@@ -2140,6 +2207,7 @@ function toggleAutoPlayPause(){
   } else {
     autoPlayNext();
   }
+  updateMediaSessionPaused(autoPlayState.paused);
   renderAutoPlayBar();
 }
 
@@ -2161,6 +2229,7 @@ function autoPlayNext(){
   if(!autoPlayState || autoPlayState.paused) return;
   if(autoPlayState.current >= autoPlayState.words.length){ stopAutoPlay(); toast('Auto-play finished!'); return; }
   const w = autoPlayState.words[autoPlayState.current];
+  if(bgPlaybackMode === 'autoplay') updateMediaSession(w.word, w.definition);
   renderAutoPlayBar();
 
   if(autoPlayState.phase === 'word'){
@@ -6466,6 +6535,7 @@ function startBrainSoak(){
   shuffle(rest);
   const words = [...priority, ...rest].slice(0, 30);
   earState = { mode:'brainsoak', words, current:0, paused:false, loop:true, speed:1, ended:false };
+  enableBackgroundPlayback('brainsoak', words[0]?.word, words[0]?.example);
   goTo('ear');
   setTimeout(()=>brainSoakPlayNext(), 500);
 }
@@ -6521,6 +6591,7 @@ function brainSoakPlayNext(){
     }
   }
   const w = earState.words[earState.current];
+  if(bgPlaybackMode === 'brainsoak') updateMediaSession(w.word, w.example);
   renderBrainSoak(document.getElementById('screen-ear'));
 
   // Passive XP for exposure
@@ -6556,6 +6627,7 @@ function toggleBrainSoakPause(){
   } else {
     brainSoakPlayNext();
   }
+  updateMediaSessionPaused(earState.paused);
   renderBrainSoak(document.getElementById('screen-ear'));
 }
 
@@ -6592,6 +6664,7 @@ function stopBrainSoak(){
   brainSoakTimer = null;
   window.speechSynthesis && window.speechSynthesis.cancel();
   if(googleAudio){ googleAudio.pause(); googleAudio = null; }
+  disableBackgroundPlayback();
   earState = null;
   goTo('ear');
 }
