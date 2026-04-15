@@ -456,6 +456,35 @@ function loadState(){ try{return JSON.parse(localStorage.getItem(STORAGE_KEY))}c
 function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) }
 function toast(msg){ const t=document.getElementById('toast');t.textContent=msg;t.className='toast show';setTimeout(()=>t.className='toast',2500) }
 
+// Word Spire integration: launch game with vocab data via Gist
+async function launchWordSpire(){
+  const token = state.settings.githubGistToken;
+  if(!token){
+    toast('Set your GitHub token in Settings first (needed for vocab sync)');
+    return;
+  }
+  try{
+    toast('Preparing Word Spire...');
+    // Find the gist so we can pass the ID
+    const headers = { 'Authorization': 'token ' + token };
+    const listResp = await fetch('https://api.github.com/gists?per_page=100', { headers, cache: 'no-store' });
+    if(!listResp.ok){ toast('GitHub API error: ' + listResp.status); return; }
+    const gists = await listResp.json();
+    const gist = gists.find(g => g.files && Object.keys(g.files).some(f => /^vocab-slot-\d\.json$/.test(f)));
+    if(!gist){ toast('No vocab sync data found. Export to Gist first (Settings > Sync).'); return; }
+    // Build Word Spire URL with params
+    // TODO: update this URL when Word Spire is deployed to GitHub Pages
+    const baseUrl = window.location.origin.includes('github.io')
+      ? 'https://galiiigigi.github.io/word-spire/'
+      : 'http://localhost:4321/';
+    const url = baseUrl + '?token=' + encodeURIComponent(token) + '&gist=' + encodeURIComponent(gist.id) + '&slot=1';
+    window.open(url, '_blank');
+  }catch(e){
+    console.error('Word Spire launch error:', e);
+    toast('Failed to launch: ' + e.message);
+  }
+}
+
 // ===== SPACED REPETITION (SM-2 + RT) =====
 function getWordProgress(wordId){
   if(!state.wordProgress[wordId]) state.wordProgress[wordId] = {
@@ -1182,6 +1211,10 @@ function renderHome(el){
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="btn" style="flex:1;background:linear-gradient(135deg,var(--green),#00d2a0)" onclick="goTo('output')">&#128483; Output</button>
       <button class="btn" style="flex:1;background:linear-gradient(135deg,var(--blue),#0984e3)" onclick="goTo('input')">&#127911; Input</button>
+    </div>
+
+    <div style="margin-bottom:12px">
+      <button class="btn" style="width:100%;background:linear-gradient(135deg,#6c3483,#8e44ad);font-size:14px;padding:12px" onclick="launchWordSpire()">&#9876;&#65039; Play Word Spire</button>
     </div>
 
     ${todayData.reviewed > 0 || todayXP > 0 ? `<div class="card card-sm mb" style="padding:10px">

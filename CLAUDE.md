@@ -80,6 +80,9 @@ Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inl
 - **Voice Chat** (~2988): Recording, sendVoiceChat with Gemini audio
 - **AI Chat** (~3044): SCENARIOS array (16 scenarios), startChat, startFreeChat, customPrompt support
 - **Free Chat** (~3660): Open-ended bilingual grammar correction, reviews weak words
+- **Language Parent** (~6185): `startLanguageParent()` — Chris Lonsdale method, recasts instead of correcting, simple language, body language cues
+- **Word Mixing Drill** (~6215): `startWordMixing()` — combine 2-3 words into sentences, AI evaluates, SRS+XP
+- **Brain Soak** (~6372): `startBrainSoak()` — passive immersion, plays sentences on loop with repeat, speed/loop controls
 - **Add Word from Chat** (~3870): showAddWordFromChatModal, addSuggestedWord, addAllSuggestedWords
 - **AI Explain** (~3935): aiExplainWord for word detail
 - **AI Rephrase** (~5168): `aiRephraseWord()` single + `batchRephraseWords()` batch, with undo
@@ -109,10 +112,14 @@ Home | Quiz | Cards | Words | Settings (Stats accessible via stat boxes on home)
 - `parseGeminiImport()` — smart JSON importer (arrays, dicts, wrapped objects)
 - `getDailyWord()` — random due/weak word for home "Word of the Moment"
 - `startFreeChat()` — bilingual grammar correction ([Correction] X/O/Tip format)
+- `startLanguageParent()` — Chris Lonsdale Language Parent chat (recast, no correction)
+- `startWordMixing()` — word combo drill, 2-3 words → sentence → AI eval
+- `startBrainSoak()` / `stopBrainSoak()` — passive sentence immersion player
+- `brainSoakPlayNext()` — plays sentence twice (normal + slow), auto-advances
 - `showAddWordFromChatModal()` — save word during chat with AI auto-fill
 - `endSessionEarly(mode)` — End button for quiz, cards, voice, ear
 - `dontKnowQuiz()` — reveals answer without guessing, records quality 0
-- `awardXP(source, wordId, amount)` — XP with diminishing returns (1st=100%, 2nd=50%, 3rd=25%, 4th+=0% per word+source)
+- `awardXP(source, wordId, amount)` — XP with diminishing returns (1st=100%, 2nd=50%, 3rd=25%, 4th+=0% per word+source). Sources: review, newword, milestone-*, freechat, chat:*, langparent, subdrill, shadowing, dictation, listening, listen-respond:*, wordmixing, brainsoak
 - `getCEFRLevel()` / `getCEFRProgress()` — current level + progress to next based on total XP
 - `getSkillLevels()` — per-skill CEFR estimates (vocab, speaking, listening, drills)
 - `CEFR_LEVELS` — A1→C2 with XP thresholds, vocab targets, IELTS equivalents
