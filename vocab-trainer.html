@@ -314,6 +314,7 @@ textarea.form-input{min-height:60px;resize:vertical}
   <div class="screen" id="screen-pretest"></div>
   <div class="screen" id="screen-addwords"></div>
   <div class="screen" id="screen-ear"></div>
+  <div class="screen" id="screen-story"></div>
   <div class="screen" id="screen-words"></div>
   <div class="screen" id="screen-stats"></div>
   <div class="screen" id="screen-settings"></div>
@@ -431,6 +432,8 @@ if(!state.rtHistory) state.rtHistory = [];
 if(!state.xp) state.xp = { total:0, wordXP:{}, dailyXP:{} };
 if(!state.settings.targetLevel) state.settings.targetLevel = 'B2';
 if(!state.settings.layout) state.settings.layout = 'mobile';
+if(!state.listeningHistory) state.listeningHistory = [];
+if(!state.settings.storyMaxHistory) state.settings.storyMaxHistory = 200;
 
 function getGeminiModel(){ return state.settings.geminiModel || 'gemini-2.0-flash'; }
 function getGeminiUrl(key){ return `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(key)}`; }
@@ -501,6 +504,16 @@ function getWordStatus(wordId){
   if(wp.interval >= si.familiarAt) return 'familiar';
   if(wp.repetitions >= 3) return 'learning';
   return 'beginner';
+}
+
+// Pick N non-mastered words (for Story Mode)
+function pickNonMasteredWords(n){
+  n = n || 5;
+  const pool = (WORDS||[]).filter(w => getWordStatus(w.id) !== 'mastered');
+  const source = pool.length >= n ? pool : (WORDS||[]);
+  if(source.length === 0) return [];
+  const shuffled = source.slice().sort(()=>Math.random()-0.5);
+  return shuffled.slice(0, Math.min(n, shuffled.length));
 }
 
 // Reading speed by CEFR level (seconds per word)
@@ -911,6 +924,65 @@ function testGoogleTTS(){
   googleSpeak('Hello! Welcome to Canada, how are you doing today?', null, true);
 }
 
+// ===== AUDIO CACHE (IndexedDB for Story Mode) =====
+const AUDIO_DB_NAME = 'vocabAudio';
+const AUDIO_STORE = 'stories';
+let _audioDbPromise = null;
+function openAudioDB(){
+  if(_audioDbPromise) return _audioDbPromise;
+  _audioDbPromise = new Promise((resolve,reject)=>{
+    if(!window.indexedDB){ reject(new Error('IndexedDB not supported')); return; }
+    const req = indexedDB.open(AUDIO_DB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(AUDIO_STORE)) db.createObjectStore(AUDIO_STORE);
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+  return _audioDbPromise;
+}
+const audioDB = {
+  async put(key, blob){
+    const db = await openAudioDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(AUDIO_STORE,'readwrite');
+      const r = tx.objectStore(AUDIO_STORE).put(blob, key);
+      r.onsuccess = ()=>res(); r.onerror = ()=>rej(r.error);
+    });
+  },
+  async get(key){
+    const db = await openAudioDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(AUDIO_STORE,'readonly');
+      const r = tx.objectStore(AUDIO_STORE).get(key);
+      r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error);
+    });
+  },
+  async delete(key){
+    const db = await openAudioDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(AUDIO_STORE,'readwrite');
+      const r = tx.objectStore(AUDIO_STORE).delete(key);
+      r.onsuccess = ()=>res(); r.onerror = ()=>rej(r.error);
+    });
+  },
+  async listKeys(){
+    const db = await openAudioDB();
+    return new Promise((res,rej)=>{
+      const tx = db.transaction(AUDIO_STORE,'readonly');
+      const r = tx.objectStore(AUDIO_STORE).getAllKeys();
+      r.onsuccess = ()=>res(r.result||[]); r.onerror = ()=>rej(r.error);
+    });
+  }
+};
+function base64ToBlob(base64, mime){
+  const bytes = atob(base64);
+  const buf = new Uint8Array(bytes.length);
+  for(let i=0;i<bytes.length;i++) buf[i] = bytes.charCodeAt(i);
+  return new Blob([buf], {type: mime || 'audio/mp3'});
+}
+
 // ===== BACKGROUND PLAYBACK (Media Session + Audio Keepalive) =====
 // Tiny silent MP3 (~200 bytes) to keep audio session alive when screen is off
 const SILENT_MP3 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwBHAAAAAAD/+1DEAAAHAAGf9AAAIgAAM/8AAABMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/7UMQfA8AAAaQAAAAAAAA0gAAABFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==';
@@ -1116,6 +1188,7 @@ function renderScreen(screen){
     case 'pretest': renderPretest(el); break;
     case 'addwords': renderAddWords(el); break;
     case 'ear': renderEarTraining(el); break;
+    case 'story': renderStoryScreen(el); break;
     case 'settings': renderSettings(el); break;
   }
 }
@@ -1189,6 +1262,15 @@ function renderInputScreen(el){
         </div>
       </div>
     </div>
+    <div class="card mb" style="border:2px solid var(--accent2);background:linear-gradient(135deg,var(--bg2),rgba(253,203,110,.08));cursor:pointer" onclick="openStoryMode()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:28px">&#127908;</span>
+        <div>
+          <h3 style="margin:0;color:var(--accent2)">Story</h3>
+          <p style="font-size:12px;color:var(--text2);margin:2px 0 0">AI-generated audio — podcast or interview prep</p>
+        </div>
+      </div>
+    </div>
 
     <div style="font-size:12px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Active Listening</div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
@@ -1203,6 +1285,381 @@ function renderInputScreen(el){
       <button class="btn btn-sm btn-ghost" onclick="startEarMinimalPairs()" style="justify-content:flex-start;text-align:left">&#128066; Minimal Pairs <span style="font-size:11px;color:var(--text3);margin-left:auto">Which word did you hear?</span></button>
     </div>
     ${!hasKey?'<div style="font-size:11px;color:var(--orange);margin-top:12px;text-align:center">Some modes require a Gemini API key in Settings</div>':''}`;
+}
+
+// ===== STORY MODE =====
+const STORY_WORD_COUNT = 5;
+const STORY_TARGET_WORDS = 300;
+const VIBES_PODCAST = [
+  'midnight confessional, hushed and honest',
+  'curious investigator laying out clues one by one',
+  'warm mentor sharing a lesson learned the hard way',
+  'skeptical observer questioning a common assumption',
+  'nostalgic reflection on something long past',
+  'someone piecing together a small mystery',
+  'enthusiastic fan geeking out over a niche topic',
+  'calm outside analyst making sense of noisy chaos',
+  'first-time visitor describing an unfamiliar place',
+  'older self giving advice to younger self'
+];
+const VIBES_INTERVIEW = [
+  'behavioral STAR question about handling conflict with a peer',
+  'hypothetical scenario about making a decision with incomplete data',
+  'weakness or biggest professional challenge question',
+  'culture fit and team dynamics question',
+  'technical deep-dive on specific domain knowledge',
+  'cross-department collaboration breakdown question',
+  'leadership or mentorship situational question',
+  'priority management under shifting deadlines',
+  'failure post-mortem and lessons learned',
+  'describing a project owned end-to-end with measurable outcome'
+];
+const STORY_FORMATS = {
+  podcast:   { label:'Podcast',        icon:'\u{1F3A4}', vibes:VIBES_PODCAST },
+  interview: { label:'Interview Q&A',  icon:'\u{1F4BC}', vibes:VIBES_INTERVIEW }
+};
+let storyState = null;
+let storyAudio = null;
+
+function openStoryMode(){
+  storyState = { view:'picker', current:null, generating:false, revealed:false };
+  goTo('story');
+}
+
+function escapeStoryHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderStoryScreen(el){
+  if(!storyState) storyState = { view:'picker', current:null, revealed:false };
+  if(storyState.view === 'player' && storyState.current){
+    return renderStoryPlayer(el);
+  }
+  const history = (state.listeningHistory || []).slice().reverse();
+  const hasGemini = !!state.settings.apiKey;
+  const hasTts = !!state.settings.googleTtsKey;
+  el.innerHTML = `
+    <h2 style="margin-bottom:4px">Story</h2>
+    <p class="subtitle" style="margin-bottom:16px">AI-generated audio using your unmastered words</p>
+    ${!hasGemini ? '<div style="font-size:12px;color:var(--orange);margin-bottom:12px;text-align:center;padding:8px;background:rgba(253,121,168,.1);border-radius:6px">Requires Gemini API key (Settings)</div>' : ''}
+    ${hasGemini && !hasTts ? '<div style="font-size:11px;color:var(--text3);margin-bottom:12px;text-align:center">No Google TTS key — will use browser voice (no caching)</div>' : ''}
+    <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Generate New</div>
+    <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-bottom:10px">
+      <button class="btn" ${!hasGemini?'disabled':''} onclick="generateStory('podcast')" style="padding:18px 8px;display:flex;flex-direction:column;align-items:center;gap:4px;background:linear-gradient(135deg,var(--bg2),rgba(0,184,148,.1));border:2px solid var(--green);color:var(--text)">
+        <span style="font-size:28px">&#127908;</span>
+        <span style="font-size:13px;font-weight:700;color:var(--green)">Podcast</span>
+        <span style="font-size:10px;color:var(--text3)">First-person monologue</span>
+      </button>
+      <button class="btn" ${!hasGemini?'disabled':''} onclick="generateStory('interview')" style="padding:18px 8px;display:flex;flex-direction:column;align-items:center;gap:4px;background:linear-gradient(135deg,var(--bg2),rgba(9,132,227,.1));border:2px solid var(--blue);color:var(--text)">
+        <span style="font-size:28px">&#128188;</span>
+        <span style="font-size:13px;font-weight:700;color:var(--blue)">Interview Q&amp;A</span>
+        <span style="font-size:10px;color:var(--text3)">Prep scenario + answer</span>
+      </button>
+    </div>
+    <button class="btn btn-ghost btn-sm" ${!hasGemini?'disabled':''} onclick="generateStory('random')" style="margin-bottom:20px;width:100%">&#127922; Surprise Me</button>
+    ${history.length > 0 ? `
+      <div style="font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Library (${history.length})</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${history.map(s => {
+          const fmt = STORY_FORMATS[s.format] || {label:s.format, icon:''};
+          const wordsShort = (s.words||[]).slice(0,5).join(', ');
+          return `<div class="card" style="padding:10px 12px;cursor:pointer" onclick="openStoryFromHistory('${s.id}')">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:600">${fmt.icon} ${fmt.label}</div>
+                <div style="font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeStoryHtml(wordsShort)}</div>
+              </div>
+              <div style="font-size:11px;color:var(--text3);white-space:nowrap">&#9658; ${s.plays||0}${s.audioKey?' &#128190;':''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    ` : '<div style="font-size:12px;color:var(--text3);text-align:center;margin-top:20px">No stories yet. Generate one above to begin.</div>'}`;
+}
+
+function renderStoryPlayer(el){
+  const s = storyState.current;
+  const fmt = STORY_FORMATS[s.format] || {label:s.format, icon:''};
+  const showText = !!storyState.revealed;
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <button class="btn btn-ghost btn-sm" onclick="backToStoryPicker()">&larr; Back</button>
+      <div style="font-size:12px;color:var(--text3)">${fmt.icon} ${fmt.label}</div>
+    </div>
+    ${storyState.generating ? `
+      <div class="text-center" style="padding-top:40px">
+        <div style="font-size:32px;margin-bottom:12px">&#127897;</div>
+        <h3>${escapeStoryHtml(storyState.genStatus || 'Generating...')}</h3>
+        <p class="subtitle">${escapeStoryHtml((s.words||[]).join(', '))}</p>
+      </div>` : `
+      <div class="card mb" style="padding:16px">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Words</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:14px">${escapeStoryHtml((s.words||[]).join(' · '))}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="playStory()" style="flex:1;min-width:120px;background:linear-gradient(135deg,var(--green),#00d2a0);color:white">&#9654; Play</button>
+          <button class="btn btn-ghost btn-sm" onclick="stopStoryPlayback()">&#9632; Stop</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleStoryText()">${showText?'Hide':'Show'} text</button>
+        </div>
+      </div>
+      ${showText ? `<div class="card" style="padding:14px;font-size:14px;line-height:1.7;color:var(--text);white-space:pre-wrap">${escapeStoryHtml(s.passage||'')}</div>` : ''}
+      <div style="margin-top:12px;display:flex;gap:6px;justify-content:space-between">
+        <button class="btn btn-ghost btn-sm" onclick="regenerateCurrentStory()">&#8635; New variation</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteCurrentStory()">&times; Delete</button>
+      </div>
+    `}`;
+}
+
+function backToStoryPicker(){
+  stopStoryPlayback();
+  storyState = { view:'picker', current:null, revealed:false };
+  renderScreen('story');
+}
+
+function toggleStoryText(){
+  if(!storyState) return;
+  storyState.revealed = !storyState.revealed;
+  renderScreen('story');
+}
+
+async function generateStory(formatOrRandom){
+  if(!state.settings.apiKey){ toast('Add Gemini API key first'); return; }
+  const format = formatOrRandom === 'random'
+    ? (Math.random() < 0.5 ? 'podcast' : 'interview')
+    : formatOrRandom;
+  const fmtDef = STORY_FORMATS[format];
+  if(!fmtDef){ toast('Unknown format'); return; }
+  const words = pickNonMasteredWords(STORY_WORD_COUNT);
+  if(words.length < 2){ toast('Add some words first'); return; }
+  const vibe = fmtDef.vibes[Math.floor(Math.random() * fmtDef.vibes.length)];
+  const wordList = words.map(w=>w.word).join(', ');
+  const id = 'st_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+
+  stopStoryPlayback();
+  storyState = {
+    view:'player',
+    generating:true,
+    genStatus:'Writing passage...',
+    revealed:false,
+    current:{ id, format, words: words.map(w=>w.word), passage:'', vibe, createdAt:Date.now(), plays:0, audioKey:null }
+  };
+  goTo('story');
+
+  let prompt;
+  if(format === 'podcast'){
+    prompt = `Write a first-person podcast-style monologue of roughly ${STORY_TARGET_WORDS} words for an intermediate ESL learner.
+
+Vibe: ${vibe}.
+Weave these vocabulary words naturally into the passage (use each at least once, in a context that makes the meaning clear): ${wordList}.
+
+Style:
+- First-person voice, conversational but thoughtful
+- Specific, vivid details (avoid generic "daily life" cliches)
+- One coherent topic or story thread
+- No title, no intro like "Hello welcome" — just start speaking
+- Plain prose only: no asterisks, no headers, no bullet points, no markdown
+- Under ${STORY_TARGET_WORDS + 60} words total
+
+Output: only the monologue text itself. Nothing else.`;
+  } else {
+    prompt = `Write an interview-prep audio passage of roughly ${STORY_TARGET_WORDS} words for an ESL professional preparing for job interviews.
+
+Scenario type: ${vibe}.
+Structure:
+- Line 1: "Interviewer:" followed by a natural question (2-3 sentences).
+- Line 2+: "Candidate:" followed by a strong model answer showing how a thoughtful candidate would respond.
+
+Weave these vocabulary words naturally into the candidate's answer: ${wordList}.
+
+Style:
+- Concrete scenario details, not vague platitudes
+- Intermediate-to-upper English level
+- Under ${STORY_TARGET_WORDS + 80} words total
+- No stage directions, no markdown, no asterisks
+
+Output: only the dialogue itself. Nothing else.`;
+  }
+
+  const sys = 'You are a writer generating natural, engaging audio content for ESL learners. Write plain continuous prose only — no markdown, no headers, no asterisks, no code fences.';
+  let passage;
+  try{
+    passage = await callGemini([{role:'user', text:prompt}], sys);
+  }catch(e){
+    storyState.generating = false;
+    toast('Generation failed');
+    renderScreen('story');
+    return;
+  }
+  if(!passage){
+    storyState.generating = false;
+    toast('AI returned empty response');
+    renderScreen('story');
+    return;
+  }
+  passage = cleanGeminiText(passage).trim().replace(/\*\*/g,'').replace(/^\*+\s*/gm,'');
+  storyState.current.passage = passage;
+
+  state.listeningHistory = state.listeningHistory || [];
+  state.listeningHistory.push({
+    id, format, passage,
+    words: storyState.current.words,
+    vibe, audioKey:null,
+    createdAt: Date.now(), lastPlayed:null, plays:0
+  });
+  const maxH = state.settings.storyMaxHistory || 200;
+  while(state.listeningHistory.length > maxH){
+    const removed = state.listeningHistory.shift();
+    if(removed && removed.audioKey) audioDB.delete(removed.audioKey).catch(()=>{});
+  }
+  saveState();
+
+  storyState.generating = false;
+  storyState.genStatus = '';
+  renderScreen('story');
+
+  // Warm up TTS cache in the background so first Play tap is instant
+  prepareStoryAudio(id).catch(e => console.warn('Audio preload failed:', e));
+}
+
+async function prepareStoryAudio(storyId){
+  const entry = (state.listeningHistory || []).find(s => s.id === storyId);
+  if(!entry || entry.audioKey) return;
+  if(!state.settings.googleTtsKey) return;
+  const voice = state.settings.googleTtsVoice || 'en-CA-Neural2-D';
+  const rate = state.settings.voiceSpeed || 0.9;
+  const key = `${storyId}|${voice}|${rate}`;
+  await fetchAndCacheStoryAudio(entry.passage, key);
+  entry.audioKey = key;
+  saveState();
+  // If current player is this story, refresh to show the save icon
+  if(storyState && storyState.current && storyState.current.id === storyId){
+    storyState.current.audioKey = key;
+  }
+}
+
+async function fetchAndCacheStoryAudio(text, key){
+  const apiKey = state.settings.googleTtsKey;
+  if(!apiKey) throw new Error('No TTS key');
+  let cleanText = (text||'').replace(/\*\*/g,'').trim();
+  if(!cleanText) throw new Error('Empty text');
+  if(cleanText.length > 4000) cleanText = cleanText.substring(0, 4000);
+  const voice = state.settings.googleTtsVoice || 'en-CA-Neural2-D';
+  const rate = state.settings.voiceSpeed || 0.9;
+  const curMonth = new Date().toISOString().slice(0,7);
+  if(state.ttsUsage.month !== curMonth){ state.ttsUsage = {month:curMonth, count:0, chars:0}; }
+  const limit = state.settings.ttsMonthlyLimit || 900000;
+  if(state.ttsUsage.chars + cleanText.length > limit) throw new Error('TTS monthly quota would be exceeded');
+  const langCode = voice.substring(0, 5);
+  const resp = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(apiKey)}`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      input:{text: cleanText},
+      voice:{languageCode: langCode, name: voice},
+      audioConfig:{audioEncoding:'MP3', speakingRate: rate}
+    })
+  });
+  if(!resp.ok){
+    const t = await resp.text().catch(()=>'');
+    throw new Error('TTS HTTP ' + resp.status + ': ' + t.slice(0,200));
+  }
+  const data = await resp.json();
+  state.ttsUsage.count++;
+  state.ttsUsage.chars += cleanText.length;
+  saveState();
+  if(!data.audioContent) throw new Error('No audio content');
+  const blob = base64ToBlob(data.audioContent, 'audio/mp3');
+  await audioDB.put(key, blob);
+  return blob;
+}
+
+async function playStory(){
+  if(!storyState || !storyState.current) return;
+  const entry = (state.listeningHistory || []).find(s => s.id === storyState.current.id);
+  if(!entry){ toast('Story not found'); return; }
+  const passage = entry.passage;
+  if(!passage){ toast('Empty passage'); return; }
+  stopStoryPlayback();
+  const voice = state.settings.googleTtsVoice || 'en-CA-Neural2-D';
+  const rate = state.settings.voiceSpeed || 0.9;
+  const key = entry.audioKey || `${entry.id}|${voice}|${rate}`;
+
+  let blob = null;
+  try{ blob = await audioDB.get(key); }catch(e){ blob = null; }
+
+  if(!blob){
+    if(!state.settings.googleTtsKey){
+      browserSpeak(passage, rate);
+      recordStoryPlay(entry);
+      return;
+    }
+    try{
+      toast('Generating audio...');
+      blob = await fetchAndCacheStoryAudio(passage, key);
+      entry.audioKey = key;
+      if(storyState.current) storyState.current.audioKey = key;
+      saveState();
+    }catch(e){
+      toast('TTS failed, using browser voice');
+      browserSpeak(passage, rate);
+      recordStoryPlay(entry);
+      return;
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  storyAudio = new Audio(url);
+  storyAudio.onended = () => { URL.revokeObjectURL(url); storyAudio = null; };
+  storyAudio.onerror = () => { URL.revokeObjectURL(url); storyAudio = null; toast('Audio error'); };
+  try{
+    await storyAudio.play();
+  }catch(e){
+    toast('Play blocked: tap Play again');
+  }
+  recordStoryPlay(entry);
+}
+
+function recordStoryPlay(entry){
+  entry.plays = (entry.plays||0) + 1;
+  entry.lastPlayed = Date.now();
+  saveState();
+}
+
+function stopStoryPlayback(){
+  if(storyAudio){ try{ storyAudio.pause(); }catch(e){} storyAudio = null; }
+  if(googleAudio){ try{ googleAudio.pause(); }catch(e){} googleAudio = null; }
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+}
+
+function openStoryFromHistory(id){
+  const entry = (state.listeningHistory || []).find(s => s.id === id);
+  if(!entry){ toast('Not found'); return; }
+  stopStoryPlayback();
+  storyState = {
+    view:'player',
+    generating:false,
+    revealed:false,
+    current:{
+      id: entry.id, format: entry.format, words: entry.words||[],
+      passage: entry.passage, vibe: entry.vibe,
+      createdAt: entry.createdAt, plays: entry.plays||0, audioKey: entry.audioKey
+    }
+  };
+  renderScreen('story');
+}
+
+function regenerateCurrentStory(){
+  if(!storyState || !storyState.current) return;
+  generateStory(storyState.current.format);
+}
+
+function deleteCurrentStory(){
+  if(!storyState || !storyState.current) return;
+  if(!confirm('Delete this story?')) return;
+  const id = storyState.current.id;
+  const entry = (state.listeningHistory || []).find(s => s.id === id);
+  if(entry && entry.audioKey) audioDB.delete(entry.audioKey).catch(()=>{});
+  state.listeningHistory = (state.listeningHistory || []).filter(s => s.id !== id);
+  saveState();
+  backToStoryPicker();
 }
 
 // ===== DAILY WORD =====
