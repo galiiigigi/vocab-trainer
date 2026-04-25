@@ -7213,7 +7213,7 @@ const VMAP_WORDS = [
   {w:'stakeholder',d:'business',b:'4-6K'},{w:'deliverable',d:'business',b:'4-6K'},{w:'leverage',d:'business',b:'4-6K'},
   {w:'procurement',d:'business',b:'4-6K'},{w:'milestone',d:'business',b:'4-6K'},{w:'forecast',d:'business',b:'4-6K'},
   {w:'liability',d:'business',b:'4-6K'},{w:'compliance',d:'business',b:'4-6K'},{w:'overhead',d:'business',b:'4-6K'},
-  {w:'turnover',d:'business',b:'4-6K'},{w:'leverage',d:'business',b:'4-6K'},{w:'onboarding',d:'business',b:'4-6K'},
+  {w:'turnover',d:'business',b:'4-6K'},{w:'backlog',d:'business',b:'4-6K'},{w:'onboarding',d:'business',b:'4-6K'},
   // 7-10K
   {w:'fiduciary',d:'business',b:'7-10K'},{w:'arbitrage',d:'business',b:'7-10K'},{w:'escrow',d:'business',b:'7-10K'},
   {w:'indemnify',d:'business',b:'7-10K'},{w:'lien',d:'business',b:'7-10K'},{w:'amortize',d:'business',b:'7-10K'},
@@ -7250,7 +7250,7 @@ const VMAP_WORDS = [
   {w:'weary',d:'literary',b:'2-3K'},{w:'gentle',d:'literary',b:'2-3K'},{w:'vivid',d:'literary',b:'2-3K'},
   {w:'modest',d:'literary',b:'2-3K'},{w:'calm',d:'literary',b:'2-3K'},{w:'passionate',d:'literary',b:'2-3K'},
   {w:'thrilling',d:'literary',b:'2-3K'},{w:'fragile',d:'literary',b:'2-3K'},{w:'graceful',d:'literary',b:'2-3K'},
-  {w:'solemn',d:'literary',b:'2-3K'},{w:'vivid',d:'literary',b:'2-3K'},{w:'eager',d:'literary',b:'2-3K'},
+  {w:'solemn',d:'literary',b:'2-3K'},{w:'tender',d:'literary',b:'2-3K'},{w:'eager',d:'literary',b:'2-3K'},
   // 4-6K
   {w:'melancholy',d:'literary',b:'4-6K'},{w:'profound',d:'literary',b:'4-6K'},{w:'austere',d:'literary',b:'4-6K'},
   {w:'sublime',d:'literary',b:'4-6K'},{w:'fervent',d:'literary',b:'4-6K'},{w:'languish',d:'literary',b:'4-6K'},
@@ -7319,16 +7319,29 @@ function vmapShuffle(arr){ return arr.slice().sort(()=>Math.random()-0.5); }
 function startVocabTest(perCell){
   perCell = perCell || 8;
   const sampled = [];
+  const seen = new Set();
   VMAP_DOMAINS.forEach(domain => {
     domain.bands.forEach(band => {
       const candidates = VMAP_WORDS.filter(w => w.d === domain.id && w.b === band);
-      const picks = vmapShuffle(candidates).slice(0, Math.min(perCell, candidates.length));
-      picks.forEach(p => sampled.push({word:p.w, domain:p.d, band:p.b, isFake:false}));
+      const shuffled = vmapShuffle(candidates);
+      let picked = 0;
+      for(const p of shuffled){
+        if(picked >= perCell) break;
+        const key = p.w.toLowerCase();
+        if(seen.has(key)) continue; // skip dupes from data or already sampled in another cell
+        seen.add(key);
+        sampled.push({word:p.w, domain:p.d, band:p.b, isFake:false});
+        picked++;
+      }
     });
   });
   // Add ~20 fakes
   const fakes = vmapShuffle(VMAP_FAKES).slice(0, 20);
-  fakes.forEach(f => sampled.push({word:f, domain:'fake', band:'fake', isFake:true}));
+  fakes.forEach(f => {
+    if(seen.has(f.toLowerCase())) return;
+    seen.add(f.toLowerCase());
+    sampled.push({word:f, domain:'fake', band:'fake', isFake:true});
+  });
   vtest = {
     step:'running',
     words: vmapShuffle(sampled),
