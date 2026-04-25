@@ -315,6 +315,7 @@ textarea.form-input{min-height:60px;resize:vertical}
   <div class="screen" id="screen-addwords"></div>
   <div class="screen" id="screen-ear"></div>
   <div class="screen" id="screen-story"></div>
+  <div class="screen" id="screen-vtest"></div>
   <div class="screen" id="screen-words"></div>
   <div class="screen" id="screen-stats"></div>
   <div class="screen" id="screen-settings"></div>
@@ -1166,7 +1167,7 @@ function goTo(screen){
   const navBtns = document.querySelectorAll('.nav-btn');
   const map = {home:0,output:1,input:2,words:3,settings:4};
   // Sub-screens highlight their parent tab
-  const parentMap = {chat:1,voice:1,ear:1,quiz:3,cards:3,addwords:3,pretest:3};
+  const parentMap = {chat:1,voice:1,ear:1,quiz:3,cards:3,addwords:3,pretest:3,vtest:3};
   const navIdx = map[screen] !== undefined ? map[screen] : parentMap[screen];
   if(navIdx !== undefined && navBtns[navIdx]) navBtns[navIdx].classList.add('active');
   renderScreen(screen);
@@ -1189,6 +1190,7 @@ function renderScreen(screen){
     case 'addwords': renderAddWords(el); break;
     case 'ear': renderEarTraining(el); break;
     case 'story': renderStoryScreen(el); break;
+    case 'vtest': renderVocabTest(el); break;
     case 'settings': renderSettings(el); break;
   }
 }
@@ -1735,8 +1737,9 @@ function renderHome(el){
       <button class="btn" style="flex:1;background:linear-gradient(135deg,var(--blue),#0984e3)" onclick="goTo('input')">&#127911; Input</button>
     </div>
 
-    <div style="margin-bottom:12px">
-      <button class="btn" style="width:100%;background:linear-gradient(135deg,#6c3483,#8e44ad);font-size:14px;padding:12px" onclick="launchWordSpire()">&#9876;&#65039; Play Word Spire</button>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn" style="flex:1;background:linear-gradient(135deg,#6c3483,#8e44ad);font-size:13px;padding:12px" onclick="launchWordSpire()">&#9876;&#65039; Word Spire</button>
+      <button class="btn" style="flex:1;background:linear-gradient(135deg,#0984e3,#00b894);font-size:13px;padding:12px" onclick="goTo('vtest')">&#128205; Vocab Map</button>
     </div>
 
     ${todayData.reviewed > 0 || todayXP > 0 ? `<div class="card card-sm mb" style="padding:10px">
@@ -7125,6 +7128,585 @@ function stopBrainSoak(){
   earState = null;
   goTo('ear');
 }
+
+// ===== VOCAB MAP (Frequency × Domain Test) =====
+// Maps user's vocabulary across 7 domains and 5 frequency bands.
+// Designed for non-linear learners (gaps don't follow standard curriculum).
+
+const VMAP_DOMAINS = [
+  {id:'daily',     label:'Daily / Domestic',    bands:['1K','2-3K','4-6K','7-10K']},
+  {id:'academic',  label:'Academic / Formal',   bands:['1K','2-3K','4-6K','7-10K','10K+']},
+  {id:'business',  label:'Business / Office',   bands:['1K','2-3K','4-6K','7-10K']},
+  {id:'canadian',  label:'Canadian Workplace',  bands:['1K','2-3K','4-6K','7-10K']},
+  {id:'literary',  label:'Literary / IELTS',    bands:['2-3K','4-6K','7-10K','10K+']},
+  {id:'colloquial',label:'Colloquial / Slang',  bands:['1K','2-3K','4-6K']},
+  {id:'phrasal',   label:'Phrasal / Idioms',    bands:['1K','2-3K','4-6K']},
+];
+
+const VMAP_BANDS = ['1K','2-3K','4-6K','7-10K','10K+'];
+// Approximate "untested band size" used for extrapolation
+const VMAP_BAND_SIZES = {'1K':1000, '2-3K':2000, '4-6K':3000, '7-10K':4000, '10K+':5000};
+
+// Word bank — each entry: {word, domain, band}
+// ~12 words per cell so sampling has variety; total ~330 real words.
+const VMAP_WORDS = [
+  // ===== DAILY / DOMESTIC =====
+  // 1K
+  {w:'chair',d:'daily',b:'1K'},{w:'table',d:'daily',b:'1K'},{w:'bed',d:'daily',b:'1K'},
+  {w:'kitchen',d:'daily',b:'1K'},{w:'water',d:'daily',b:'1K'},{w:'door',d:'daily',b:'1K'},
+  {w:'window',d:'daily',b:'1K'},{w:'wash',d:'daily',b:'1K'},{w:'clean',d:'daily',b:'1K'},
+  {w:'cook',d:'daily',b:'1K'},{w:'sleep',d:'daily',b:'1K'},{w:'eat',d:'daily',b:'1K'},
+  // 2-3K
+  {w:'pillow',d:'daily',b:'2-3K'},{w:'blanket',d:'daily',b:'2-3K'},{w:'towel',d:'daily',b:'2-3K'},
+  {w:'sink',d:'daily',b:'2-3K'},{w:'drawer',d:'daily',b:'2-3K'},{w:'shelf',d:'daily',b:'2-3K'},
+  {w:'broom',d:'daily',b:'2-3K'},{w:'mop',d:'daily',b:'2-3K'},{w:'fridge',d:'daily',b:'2-3K'},
+  {w:'oven',d:'daily',b:'2-3K'},{w:'curtain',d:'daily',b:'2-3K'},{w:'kettle',d:'daily',b:'2-3K'},
+  // 4-6K
+  {w:'mattress',d:'daily',b:'4-6K'},{w:'faucet',d:'daily',b:'4-6K'},{w:'duvet',d:'daily',b:'4-6K'},
+  {w:'spatula',d:'daily',b:'4-6K'},{w:'whisk',d:'daily',b:'4-6K'},{w:'colander',d:'daily',b:'4-6K'},
+  {w:'tongs',d:'daily',b:'4-6K'},{w:'peeler',d:'daily',b:'4-6K'},{w:'grater',d:'daily',b:'4-6K'},
+  {w:'hamper',d:'daily',b:'4-6K'},{w:'pantry',d:'daily',b:'4-6K'},{w:'thermostat',d:'daily',b:'4-6K'},
+  // 7-10K
+  {w:'ladle',d:'daily',b:'7-10K'},{w:'sieve',d:'daily',b:'7-10K'},{w:'pestle',d:'daily',b:'7-10K'},
+  {w:'ottoman',d:'daily',b:'7-10K'},{w:'valance',d:'daily',b:'7-10K'},{w:'sconce',d:'daily',b:'7-10K'},
+  {w:'doily',d:'daily',b:'7-10K'},{w:'eiderdown',d:'daily',b:'7-10K'},{w:'hinge',d:'daily',b:'7-10K'},
+  {w:'caulk',d:'daily',b:'7-10K'},{w:'grout',d:'daily',b:'7-10K'},{w:'mantel',d:'daily',b:'7-10K'},
+
+  // ===== ACADEMIC / FORMAL =====
+  // 1K
+  {w:'study',d:'academic',b:'1K'},{w:'school',d:'academic',b:'1K'},{w:'learn',d:'academic',b:'1K'},
+  {w:'write',d:'academic',b:'1K'},{w:'read',d:'academic',b:'1K'},{w:'book',d:'academic',b:'1K'},
+  {w:'paper',d:'academic',b:'1K'},{w:'test',d:'academic',b:'1K'},{w:'class',d:'academic',b:'1K'},
+  {w:'teacher',d:'academic',b:'1K'},{w:'word',d:'academic',b:'1K'},{w:'idea',d:'academic',b:'1K'},
+  // 2-3K
+  {w:'research',d:'academic',b:'2-3K'},{w:'theory',d:'academic',b:'2-3K'},{w:'evidence',d:'academic',b:'2-3K'},
+  {w:'argument',d:'academic',b:'2-3K'},{w:'analysis',d:'academic',b:'2-3K'},{w:'method',d:'academic',b:'2-3K'},
+  {w:'data',d:'academic',b:'2-3K'},{w:'conclusion',d:'academic',b:'2-3K'},{w:'thesis',d:'academic',b:'2-3K'},
+  {w:'source',d:'academic',b:'2-3K'},{w:'concept',d:'academic',b:'2-3K'},{w:'approach',d:'academic',b:'2-3K'},
+  // 4-6K
+  {w:'hypothesis',d:'academic',b:'4-6K'},{w:'methodology',d:'academic',b:'4-6K'},{w:'paradigm',d:'academic',b:'4-6K'},
+  {w:'empirical',d:'academic',b:'4-6K'},{w:'qualitative',d:'academic',b:'4-6K'},{w:'quantitative',d:'academic',b:'4-6K'},
+  {w:'refute',d:'academic',b:'4-6K'},{w:'corroborate',d:'academic',b:'4-6K'},{w:'infer',d:'academic',b:'4-6K'},
+  {w:'deduce',d:'academic',b:'4-6K'},{w:'discourse',d:'academic',b:'4-6K'},{w:'rigorous',d:'academic',b:'4-6K'},
+  // 7-10K
+  {w:'epistemology',d:'academic',b:'7-10K'},{w:'axiomatic',d:'academic',b:'7-10K'},{w:'heuristic',d:'academic',b:'7-10K'},
+  {w:'ontological',d:'academic',b:'7-10K'},{w:'normative',d:'academic',b:'7-10K'},{w:'taxonomy',d:'academic',b:'7-10K'},
+  {w:'dialectic',d:'academic',b:'7-10K'},{w:'polemical',d:'academic',b:'7-10K'},{w:'caveat',d:'academic',b:'7-10K'},
+  {w:'extrapolate',d:'academic',b:'7-10K'},{w:'corollary',d:'academic',b:'7-10K'},{w:'tautology',d:'academic',b:'7-10K'},
+  // 10K+
+  {w:'syllogism',d:'academic',b:'10K+'},{w:'palimpsest',d:'academic',b:'10K+'},{w:'eponymous',d:'academic',b:'10K+'},
+  {w:'hermeneutic',d:'academic',b:'10K+'},{w:'prolegomenon',d:'academic',b:'10K+'},{w:'cognoscenti',d:'academic',b:'10K+'},
+  {w:'exegesis',d:'academic',b:'10K+'},{w:'solipsism',d:'academic',b:'10K+'},
+
+  // ===== BUSINESS / OFFICE =====
+  // 1K
+  {w:'work',d:'business',b:'1K'},{w:'job',d:'business',b:'1K'},{w:'money',d:'business',b:'1K'},
+  {w:'sell',d:'business',b:'1K'},{w:'buy',d:'business',b:'1K'},{w:'pay',d:'business',b:'1K'},
+  {w:'office',d:'business',b:'1K'},{w:'company',d:'business',b:'1K'},{w:'price',d:'business',b:'1K'},
+  {w:'order',d:'business',b:'1K'},{w:'team',d:'business',b:'1K'},{w:'plan',d:'business',b:'1K'},
+  // 2-3K
+  {w:'meeting',d:'business',b:'2-3K'},{w:'project',d:'business',b:'2-3K'},{w:'deadline',d:'business',b:'2-3K'},
+  {w:'budget',d:'business',b:'2-3K'},{w:'invoice',d:'business',b:'2-3K'},{w:'proposal',d:'business',b:'2-3K'},
+  {w:'partner',d:'business',b:'2-3K'},{w:'supplier',d:'business',b:'2-3K'},{w:'manager',d:'business',b:'2-3K'},
+  {w:'contract',d:'business',b:'2-3K'},{w:'profit',d:'business',b:'2-3K'},{w:'revenue',d:'business',b:'2-3K'},
+  // 4-6K
+  {w:'stakeholder',d:'business',b:'4-6K'},{w:'deliverable',d:'business',b:'4-6K'},{w:'leverage',d:'business',b:'4-6K'},
+  {w:'procurement',d:'business',b:'4-6K'},{w:'milestone',d:'business',b:'4-6K'},{w:'forecast',d:'business',b:'4-6K'},
+  {w:'liability',d:'business',b:'4-6K'},{w:'compliance',d:'business',b:'4-6K'},{w:'overhead',d:'business',b:'4-6K'},
+  {w:'turnover',d:'business',b:'4-6K'},{w:'leverage',d:'business',b:'4-6K'},{w:'onboarding',d:'business',b:'4-6K'},
+  // 7-10K
+  {w:'fiduciary',d:'business',b:'7-10K'},{w:'arbitrage',d:'business',b:'7-10K'},{w:'escrow',d:'business',b:'7-10K'},
+  {w:'indemnify',d:'business',b:'7-10K'},{w:'lien',d:'business',b:'7-10K'},{w:'amortize',d:'business',b:'7-10K'},
+  {w:'remittance',d:'business',b:'7-10K'},{w:'covenant',d:'business',b:'7-10K'},{w:'subrogation',d:'business',b:'7-10K'},
+  {w:'actuarial',d:'business',b:'7-10K'},{w:'dispositive',d:'business',b:'7-10K'},{w:'accrual',d:'business',b:'7-10K'},
+
+  // ===== CANADIAN WORKPLACE =====
+  // 1K (general but used in CA workplace)
+  {w:'shift',d:'canadian',b:'1K'},{w:'break',d:'canadian',b:'1K'},{w:'pay',d:'canadian',b:'1K'},
+  {w:'boss',d:'canadian',b:'1K'},{w:'hours',d:'canadian',b:'1K'},{w:'hire',d:'canadian',b:'1K'},
+  {w:'training',d:'canadian',b:'1K'},{w:'safety',d:'canadian',b:'1K'},{w:'rules',d:'canadian',b:'1K'},
+  {w:'shift lead',d:'canadian',b:'1K'},{w:'time card',d:'canadian',b:'1K'},{w:'stat pay',d:'canadian',b:'1K'},
+  // 2-3K
+  {w:'warehouse',d:'canadian',b:'2-3K'},{w:'forklift',d:'canadian',b:'2-3K'},{w:'pallet',d:'canadian',b:'2-3K'},
+  {w:'supervisor',d:'canadian',b:'2-3K'},{w:'schedule',d:'canadian',b:'2-3K'},{w:'overtime',d:'canadian',b:'2-3K'},
+  {w:'cashier',d:'canadian',b:'2-3K'},{w:'till',d:'canadian',b:'2-3K'},{w:'casual (employment)',d:'canadian',b:'2-3K'},
+  {w:'probation',d:'canadian',b:'2-3K'},{w:'co-worker',d:'canadian',b:'2-3K'},{w:'reference check',d:'canadian',b:'2-3K'},
+  // 4-6K
+  {w:'replenishment',d:'canadian',b:'4-6K'},{w:'inbound',d:'canadian',b:'4-6K'},{w:'outbound',d:'canadian',b:'4-6K'},
+  {w:'stocker',d:'canadian',b:'4-6K'},{w:'FIFO',d:'canadian',b:'4-6K'},{w:'lot number',d:'canadian',b:'4-6K'},
+  {w:'inventory',d:'canadian',b:'4-6K'},{w:'hazard',d:'canadian',b:'4-6K'},{w:'PPE',d:'canadian',b:'4-6K'},
+  {w:'planogram',d:'canadian',b:'4-6K'},{w:'shrinkage',d:'canadian',b:'4-6K'},{w:'shift handover',d:'canadian',b:'4-6K'},
+  {w:'EI',d:'canadian',b:'4-6K'},{w:'CRA',d:'canadian',b:'4-6K'},{w:'GST',d:'canadian',b:'4-6K'},
+  {w:'T4',d:'canadian',b:'4-6K'},{w:'RRSP',d:'canadian',b:'4-6K'},{w:'ROE',d:'canadian',b:'4-6K'},
+  {w:'SIN',d:'canadian',b:'4-6K'},{w:'WCB',d:'canadian',b:'4-6K'},
+  // 7-10K
+  {w:'WHMIS',d:'canadian',b:'7-10K'},{w:'lockout-tagout',d:'canadian',b:'7-10K'},{w:'near-miss',d:'canadian',b:'7-10K'},
+  {w:'MSDS',d:'canadian',b:'7-10K'},{w:'occupational',d:'canadian',b:'7-10K'},{w:'secondment',d:'canadian',b:'7-10K'},
+  {w:'statutory holiday',d:'canadian',b:'7-10K'},{w:'gross negligence',d:'canadian',b:'7-10K'},{w:'reasonable accommodation',d:'canadian',b:'7-10K'},
+  {w:'incident report',d:'canadian',b:'7-10K'},{w:'WSIB',d:'canadian',b:'7-10K'},{w:'confined space',d:'canadian',b:'7-10K'},
+
+  // ===== LITERARY / IELTS =====
+  // 2-3K
+  {w:'weary',d:'literary',b:'2-3K'},{w:'gentle',d:'literary',b:'2-3K'},{w:'vivid',d:'literary',b:'2-3K'},
+  {w:'modest',d:'literary',b:'2-3K'},{w:'calm',d:'literary',b:'2-3K'},{w:'passionate',d:'literary',b:'2-3K'},
+  {w:'thrilling',d:'literary',b:'2-3K'},{w:'fragile',d:'literary',b:'2-3K'},{w:'graceful',d:'literary',b:'2-3K'},
+  {w:'solemn',d:'literary',b:'2-3K'},{w:'vivid',d:'literary',b:'2-3K'},{w:'eager',d:'literary',b:'2-3K'},
+  // 4-6K
+  {w:'melancholy',d:'literary',b:'4-6K'},{w:'profound',d:'literary',b:'4-6K'},{w:'austere',d:'literary',b:'4-6K'},
+  {w:'sublime',d:'literary',b:'4-6K'},{w:'fervent',d:'literary',b:'4-6K'},{w:'languish',d:'literary',b:'4-6K'},
+  {w:'ponder',d:'literary',b:'4-6K'},{w:'lament',d:'literary',b:'4-6K'},{w:'reverie',d:'literary',b:'4-6K'},
+  {w:'wistful',d:'literary',b:'4-6K'},{w:'forlorn',d:'literary',b:'4-6K'},{w:'pensive',d:'literary',b:'4-6K'},
+  // 7-10K
+  {w:'perspicacious',d:'literary',b:'7-10K'},{w:'ostensibly',d:'literary',b:'7-10K'},{w:'perfunctory',d:'literary',b:'7-10K'},
+  {w:'mellifluous',d:'literary',b:'7-10K'},{w:'ephemeral',d:'literary',b:'7-10K'},{w:'ineffable',d:'literary',b:'7-10K'},
+  {w:'sanguine',d:'literary',b:'7-10K'},{w:'capricious',d:'literary',b:'7-10K'},{w:'taciturn',d:'literary',b:'7-10K'},
+  {w:'obstreperous',d:'literary',b:'7-10K'},{w:'recalcitrant',d:'literary',b:'7-10K'},{w:'truculent',d:'literary',b:'7-10K'},
+  // 10K+
+  {w:'pulchritudinous',d:'literary',b:'10K+'},{w:'antediluvian',d:'literary',b:'10K+'},{w:'sesquipedalian',d:'literary',b:'10K+'},
+  {w:'lugubrious',d:'literary',b:'10K+'},{w:'recrudescence',d:'literary',b:'10K+'},{w:'apothegm',d:'literary',b:'10K+'},
+  {w:'quotidian',d:'literary',b:'10K+'},{w:'panegyric',d:'literary',b:'10K+'},
+
+  // ===== COLLOQUIAL / SLANG =====
+  // 1K (very common)
+  {w:'cool',d:'colloquial',b:'1K'},{w:'awesome',d:'colloquial',b:'1K'},{w:'hey',d:'colloquial',b:'1K'},
+  {w:'guys',d:'colloquial',b:'1K'},{w:'stuff',d:'colloquial',b:'1K'},{w:'thing',d:'colloquial',b:'1K'},
+  {w:'okay',d:'colloquial',b:'1K'},{w:'yeah',d:'colloquial',b:'1K'},{w:'thanks',d:'colloquial',b:'1K'},
+  {w:'bye',d:'colloquial',b:'1K'},{w:'sure',d:'colloquial',b:'1K'},{w:'maybe',d:'colloquial',b:'1K'},
+  // 2-3K
+  {w:'legit',d:'colloquial',b:'2-3K'},{w:'gonna',d:'colloquial',b:'2-3K'},{w:'wanna',d:'colloquial',b:'2-3K'},
+  {w:'kinda',d:'colloquial',b:'2-3K'},{w:'gotta',d:'colloquial',b:'2-3K'},{w:'sketchy',d:'colloquial',b:'2-3K'},
+  {w:'lowkey',d:'colloquial',b:'2-3K'},{w:'vibes',d:'colloquial',b:'2-3K'},{w:'hangout',d:'colloquial',b:'2-3K'},
+  {w:'awkward',d:'colloquial',b:'2-3K'},{w:'weird',d:'colloquial',b:'2-3K'},{w:'creepy',d:'colloquial',b:'2-3K'},
+  // 4-6K
+  {w:'bummed',d:'colloquial',b:'4-6K'},{w:'stoked',d:'colloquial',b:'4-6K'},{w:'swamped',d:'colloquial',b:'4-6K'},
+  {w:'ghosted',d:'colloquial',b:'4-6K'},{w:'salty',d:'colloquial',b:'4-6K'},{w:'sus',d:'colloquial',b:'4-6K'},
+  {w:'vibing',d:'colloquial',b:'4-6K'},{w:'slammed',d:'colloquial',b:'4-6K'},{w:'flake',d:'colloquial',b:'4-6K'},
+  {w:'low-key',d:'colloquial',b:'4-6K'},{w:'cap',d:'colloquial',b:'4-6K'},{w:'bail (on plans)',d:'colloquial',b:'4-6K'},
+
+  // ===== PHRASAL VERBS / IDIOMS =====
+  // 1K
+  {w:'get up',d:'phrasal',b:'1K'},{w:'sit down',d:'phrasal',b:'1K'},{w:'come in',d:'phrasal',b:'1K'},
+  {w:'go out',d:'phrasal',b:'1K'},{w:'look at',d:'phrasal',b:'1K'},{w:'look up',d:'phrasal',b:'1K'},
+  {w:'turn on',d:'phrasal',b:'1K'},{w:'turn off',d:'phrasal',b:'1K'},{w:'pick up',d:'phrasal',b:'1K'},
+  {w:'put down',d:'phrasal',b:'1K'},{w:'wake up',d:'phrasal',b:'1K'},{w:'sit back',d:'phrasal',b:'1K'},
+  // 2-3K
+  {w:'run into',d:'phrasal',b:'2-3K'},{w:'get away',d:'phrasal',b:'2-3K'},{w:'hold up',d:'phrasal',b:'2-3K'},
+  {w:'put off',d:'phrasal',b:'2-3K'},{w:'take over',d:'phrasal',b:'2-3K'},{w:'find out',d:'phrasal',b:'2-3K'},
+  {w:'give up',d:'phrasal',b:'2-3K'},{w:'look after',d:'phrasal',b:'2-3K'},{w:'set up',d:'phrasal',b:'2-3K'},
+  {w:'work out',d:'phrasal',b:'2-3K'},{w:'go through',d:'phrasal',b:'2-3K'},{w:'come across',d:'phrasal',b:'2-3K'},
+  // 4-6K
+  {w:'hash out',d:'phrasal',b:'4-6K'},{w:'mull over',d:'phrasal',b:'4-6K'},{w:'brush off',d:'phrasal',b:'4-6K'},
+  {w:'gloss over',d:'phrasal',b:'4-6K'},{w:'weed out',d:'phrasal',b:'4-6K'},{w:'hold off',d:'phrasal',b:'4-6K'},
+  {w:'branch out',d:'phrasal',b:'4-6K'},{w:'chime in',d:'phrasal',b:'4-6K'},{w:'drum up',d:'phrasal',b:'4-6K'},
+  {w:'eke out',d:'phrasal',b:'4-6K'},{w:'iron out',d:'phrasal',b:'4-6K'},{w:'stave off',d:'phrasal',b:'4-6K'},
+];
+
+// Plausible nonwords for fake-word penalty (Lextale-style)
+const VMAP_FAKES = [
+  'plendant','scornify','vornal','morple','snerg','trizard','murvent','plurion',
+  'scrabish','terplex','spentrum','frest','gondle','plimp','scrent','druvel',
+  'slindle','vornish','plinder','twindler','mervish','blentish','gronch','cromble',
+  'dwerk','porgent','ferundle','glistrum','voctent','splending'
+];
+
+let vtest = null;
+
+// Migration
+if(!state.vmapHistory) state.vmapHistory = [];
+
+function vmapShuffle(arr){ return arr.slice().sort(()=>Math.random()-0.5); }
+
+function startVocabTest(perCell){
+  perCell = perCell || 8;
+  const sampled = [];
+  VMAP_DOMAINS.forEach(domain => {
+    domain.bands.forEach(band => {
+      const candidates = VMAP_WORDS.filter(w => w.d === domain.id && w.b === band);
+      const picks = vmapShuffle(candidates).slice(0, Math.min(perCell, candidates.length));
+      picks.forEach(p => sampled.push({word:p.w, domain:p.d, band:p.b, isFake:false}));
+    });
+  });
+  // Add ~20 fakes
+  const fakes = vmapShuffle(VMAP_FAKES).slice(0, 20);
+  fakes.forEach(f => sampled.push({word:f, domain:'fake', band:'fake', isFake:true}));
+  vtest = {
+    step:'running',
+    words: vmapShuffle(sampled),
+    idx:0,
+    responses:{},  // word -> 'know'|'unsure'|'unknown'
+    startedAt: Date.now()
+  };
+  goTo('vtest');
+}
+
+function answerVocabTest(answer){
+  if(!vtest || vtest.step !== 'running') return;
+  const w = vtest.words[vtest.idx];
+  vtest.responses[w.word] = answer;
+  vtest.idx++;
+  if(vtest.idx >= vtest.words.length){
+    finishVocabTest();
+  } else {
+    renderVocabTest(document.getElementById('screen-vtest'));
+  }
+}
+
+function finishVocabTest(){
+  vtest.step = 'results';
+  vtest.results = computeVocabEstimate();
+  renderVocabTest(document.getElementById('screen-vtest'));
+}
+
+function computeVocabEstimate(){
+  const cellStats = {}; // 'domain|band' -> {known, unsure, unknown, total, knownPct}
+  let fakeKnown = 0, fakeUnsure = 0, fakeTotal = 0;
+
+  vtest.words.forEach(w => {
+    const ans = vtest.responses[w.word];
+    if(w.isFake){
+      fakeTotal++;
+      if(ans === 'know') fakeKnown++;
+      else if(ans === 'unsure') fakeUnsure++;
+      return;
+    }
+    const key = w.domain + '|' + w.band;
+    if(!cellStats[key]) cellStats[key] = {known:0, unsure:0, unknown:0, total:0};
+    cellStats[key].total++;
+    if(ans === 'know') cellStats[key].known++;
+    else if(ans === 'unsure') cellStats[key].unsure++;
+    else cellStats[key].unknown++;
+  });
+  Object.keys(cellStats).forEach(k => {
+    const s = cellStats[k];
+    s.knownPct = s.total > 0 ? Math.round((s.known + s.unsure*0.4)/s.total*100) : 0;
+  });
+
+  const fakeYesRate = fakeTotal > 0 ? fakeKnown/fakeTotal : 0;
+  const correction = Math.max(0.5, 1 - fakeYesRate * 1.5);
+
+  // Aggregate by band across all domains
+  const bandStats = {};
+  Object.entries(cellStats).forEach(([k, s]) => {
+    const [domain, band] = k.split('|');
+    if(!bandStats[band]) bandStats[band] = {known:0, unsure:0, total:0};
+    bandStats[band].known += s.known;
+    bandStats[band].unsure += s.unsure;
+    bandStats[band].total += s.total;
+  });
+
+  let totalEstimate = 0;
+  Object.entries(bandStats).forEach(([band, s]) => {
+    if(s.total === 0) return;
+    const propKnown = (s.known + s.unsure * 0.4) / s.total;
+    totalEstimate += VMAP_BAND_SIZES[band] * propKnown;
+  });
+  totalEstimate = Math.round(totalEstimate * correction);
+
+  const cefr = totalEstimate >= 5000 ? 'C2'
+              : totalEstimate >= 4000 ? 'C1'
+              : totalEstimate >= 2500 ? 'B2'
+              : totalEstimate >= 1500 ? 'B1'
+              : totalEstimate >= 500 ? 'A2' : 'A1';
+
+  return {
+    totalEstimate, cefr, cellStats, bandStats,
+    fakeYesRate, fakeKnown, fakeUnsure, fakeTotal, correction,
+    completedAt: Date.now()
+  };
+}
+
+function commitVocabTestToLibrary(){
+  if(!vtest || !vtest.results) return;
+  if(!state.customWords) state.customWords = [];
+  const existingLower = new Set([
+    ...((state.customWords||[]).map(w => w.word.toLowerCase())),
+    ...((WORDS_RAW||[]).map(w => w[0].toLowerCase()))
+  ]);
+  let added = 0, mastered = 0, learning = 0, newCount = 0;
+  const now = Date.now();
+
+  vtest.words.forEach(w => {
+    if(w.isFake) return;
+    const key = w.word.toLowerCase();
+    const ans = vtest.responses[w.word];
+    if(existingLower.has(key)) return;
+
+    const diff = w.band === '1K' ? 1 : w.band === '2-3K' ? 2 : w.band === '4-6K' ? 3 : w.band === '7-10K' ? 4 : 5;
+    state.customWords.push({
+      word: w.word,
+      definition: '',
+      example: '',
+      category: 'vmap-' + w.domain,
+      difficulty: diff,
+      phonetic: '',
+      grammar: null,
+      vmapBand: w.band,
+      vmapDomain: w.domain,
+      vmapTested: now
+    });
+    existingLower.add(key);
+    added++;
+  });
+  rebuildWords();
+
+  // Set wordProgress for tested words
+  vtest.words.forEach(w => {
+    if(w.isFake) return;
+    const ans = vtest.responses[w.word];
+    const wObj = (WORDS||[]).find(ww => ww.word.toLowerCase() === w.word.toLowerCase());
+    if(!wObj) return;
+
+    if(ans === 'know'){
+      state.wordProgress[wObj.id] = {
+        interval: 21, easeFactor: 2.5,
+        nextReview: now + 21*86400000,
+        repetitions: 4, lastQuality: 5, lastRT: null,
+        vmapTested: now
+      };
+      mastered++;
+    } else if(ans === 'unsure'){
+      state.wordProgress[wObj.id] = {
+        interval: 3, easeFactor: 2.3,
+        nextReview: now + 3*86400000,
+        repetitions: 2, lastQuality: 3, lastRT: null,
+        vmapTested: now
+      };
+      learning++;
+    } else {
+      // unknown — leave as new (no wordProgress)
+      newCount++;
+    }
+  });
+
+  // Save test history
+  if(!state.vmapHistory) state.vmapHistory = [];
+  state.vmapHistory.push({
+    completedAt: vtest.results.completedAt,
+    totalEstimate: vtest.results.totalEstimate,
+    cefr: vtest.results.cefr,
+    cellStats: vtest.results.cellStats,
+    bandStats: vtest.results.bandStats,
+    fakeYesRate: vtest.results.fakeYesRate
+  });
+  // Cap history at 20 tests
+  if(state.vmapHistory.length > 20) state.vmapHistory = state.vmapHistory.slice(-20);
+
+  saveState();
+  return {added, mastered, learning, newCount};
+}
+
+function abandonVocabTest(){
+  if(confirm('Quit the test? Your answers so far will be lost.')){
+    vtest = null;
+    goTo('home');
+  }
+}
+
+// ===== RENDER =====
+function renderVocabTest(el){
+  if(!vtest){
+    renderVocabTestEntry(el);
+  } else if(vtest.step === 'running'){
+    renderVocabTestQuestion(el);
+  } else if(vtest.step === 'results'){
+    renderVocabTestResults(el);
+  }
+}
+
+function renderVocabTestEntry(el){
+  const cellCount = VMAP_DOMAINS.reduce((sum, d) => sum + d.bands.length, 0);
+  const perCell = 8;
+  const totalWords = cellCount * perCell + 20;
+  const lastTest = (state.vmapHistory||[])[state.vmapHistory.length - 1];
+  const daysAgo = lastTest ? Math.floor((Date.now() - lastTest.completedAt)/86400000) : null;
+
+  el.innerHTML = `
+    <h2>Vocab Map</h2>
+    <p class="subtitle" style="margin-bottom:16px">Map your vocabulary across 7 domains and 5 frequency bands. Designed for non-linear learners — finds gaps standard tests miss.</p>
+
+    ${lastTest ? `
+    <div class="card mb" style="background:linear-gradient(135deg,var(--bg2),rgba(108,92,231,.06));border:1px solid var(--accent)">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:4px">LAST TEST · ${daysAgo} day${daysAgo===1?'':'s'} ago</div>
+      <div style="display:flex;gap:16px;align-items:baseline">
+        <div style="font-size:28px;font-weight:800;color:var(--accent)">${lastTest.totalEstimate.toLocaleString()}</div>
+        <div style="color:var(--text2);font-size:13px">words · ${lastTest.cefr}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm mt" onclick="vtest={step:'results',results:state.vmapHistory[state.vmapHistory.length-1],words:[],responses:{}};renderVocabTest(document.getElementById('screen-vtest'))">View Last Result</button>
+    </div>
+    ` : ''}
+
+    <div class="card mb">
+      <h3 style="margin:0 0 8px">How it works</h3>
+      <ul style="margin:0 0 0 18px;padding:0;font-size:13px;color:var(--text2);line-height:1.6">
+        <li><b>${totalWords} words</b> across ~27 cells (frequency × domain), plus 20 fake-word traps</li>
+        <li>For each: <b>Know</b> / <b>Unsure</b> / <b>Don't know</b> (keyboard: ← ↑ →)</li>
+        <li>~<b>15-20 minutes</b>; you can pause and resume</li>
+        <li>Output: total vocab estimate + CEFR + a <b>heatmap</b> of strong/weak cells</li>
+        <li>Tested words get added to your library with the right SRS status</li>
+      </ul>
+    </div>
+
+    <div class="card mb" style="background:rgba(255,165,0,.06);border:1px solid var(--orange)">
+      <div style="font-size:13px;color:var(--text2);line-height:1.5">
+        <b style="color:var(--orange)">Be honest.</b> If you're not 100% sure, pick <b>Unsure</b>. Don't pick <b>Know</b> on words that just "look familiar" — fake-word traps will catch overclaiming and lower your score.
+      </div>
+    </div>
+
+    <button class="btn mb" onclick="startVocabTest(8)" style="width:100%">Start Test (~${totalWords} words)</button>
+    <button class="btn btn-ghost btn-sm" onclick="startVocabTest(4)" style="width:100%">Quick Mode (half-length, ~${Math.round(totalWords/2)} words)</button>
+    <button class="btn btn-ghost btn-sm mt" onclick="goTo('home')" style="width:100%">Back</button>
+  `;
+}
+
+function renderVocabTestQuestion(el){
+  const w = vtest.words[vtest.idx];
+  const total = vtest.words.length;
+  const pct = Math.round((vtest.idx / total) * 100);
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--text3)">${vtest.idx + 1} / ${total}</div>
+      <button class="btn btn-ghost btn-sm" onclick="abandonVocabTest()" style="padding:4px 10px;font-size:11px">Quit</button>
+    </div>
+    <div class="xp-bar" style="margin-bottom:24px"><div class="xp-fill" style="width:${pct}%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></div></div>
+
+    <div class="card mb" style="text-align:center;padding:48px 16px;background:linear-gradient(135deg,var(--bg2),var(--bg))">
+      <div style="font-size:38px;font-weight:800;color:var(--text);letter-spacing:-0.5px;line-height:1.2">${w.word}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+      <button class="btn" style="background:linear-gradient(135deg,var(--green),#00d2a0);padding:14px 8px;font-size:13px" onclick="answerVocabTest('know')">
+        <div>&#9989;</div>
+        <div style="font-size:12px;font-weight:700">Know it</div>
+        <div style="font-size:9px;opacity:.7;font-weight:400">←</div>
+      </button>
+      <button class="btn" style="background:linear-gradient(135deg,var(--orange),#fdcb6e);padding:14px 8px;font-size:13px" onclick="answerVocabTest('unsure')">
+        <div>&#129300;</div>
+        <div style="font-size:12px;font-weight:700">Unsure</div>
+        <div style="font-size:9px;opacity:.7;font-weight:400">↑</div>
+      </button>
+      <button class="btn" style="background:linear-gradient(135deg,#636e72,#2d3436);padding:14px 8px;font-size:13px" onclick="answerVocabTest('unknown')">
+        <div>&#10060;</div>
+        <div style="font-size:12px;font-weight:700">Don't know</div>
+        <div style="font-size:9px;opacity:.7;font-weight:400">→</div>
+      </button>
+    </div>
+
+    <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px">
+      Decide based on whether you can <b>use</b> the word, not just recognize it. Don't look it up.
+    </div>
+  `;
+}
+
+function renderVocabTestResults(el){
+  const r = vtest.results;
+  const fakeWarn = r.fakeYesRate > 0.15;
+
+  // Build heatmap
+  const heatmapRows = VMAP_DOMAINS.map(domain => {
+    const cells = VMAP_BANDS.map(band => {
+      if(!domain.bands.includes(band)){
+        return '<td style="padding:0;background:var(--bg);width:18%"><div style="opacity:.15;font-size:10px;text-align:center;padding:8px 0">—</div></td>';
+      }
+      const stats = r.cellStats[domain.id + '|' + band];
+      if(!stats || stats.total === 0){
+        return '<td style="padding:0;background:var(--bg);width:18%"><div style="opacity:.3;font-size:10px;text-align:center;padding:8px 0">no data</div></td>';
+      }
+      const pct = stats.knownPct;
+      const color = pct >= 80 ? '#00b894'
+                  : pct >= 60 ? '#fdcb6e'
+                  : pct >= 40 ? '#e17055'
+                  : pct >= 20 ? '#d63031' : '#2d3436';
+      return `<td style="padding:0;width:18%;background:${color}">
+        <div style="text-align:center;padding:10px 4px;color:#fff;font-weight:700;font-size:13px">${pct}%</div>
+        <div style="text-align:center;color:#fff;font-size:9px;opacity:.85;padding-bottom:4px">${stats.known}/${stats.total}</div>
+      </td>`;
+    }).join('');
+    return `<tr>
+      <td style="padding:6px 8px;font-size:11px;color:var(--text);font-weight:600;width:28%">${domain.label}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <h2 style="margin:0 0 4px">Your Vocab Map</h2>
+    <p class="subtitle" style="margin-bottom:16px">Heatmap of strengths and gaps</p>
+
+    <div class="card mb" style="background:linear-gradient(135deg,var(--bg2),rgba(108,92,231,.08));border:1px solid var(--accent);text-align:center;padding:24px">
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Estimated Vocabulary</div>
+      <div style="font-size:48px;font-weight:800;color:var(--accent);line-height:1">${r.totalEstimate.toLocaleString()}</div>
+      <div style="color:var(--text2);font-size:14px;margin-top:4px">words · ${r.cefr}</div>
+    </div>
+
+    ${fakeWarn ? `
+    <div class="card mb" style="background:rgba(214,48,49,.08);border:1px solid var(--red)">
+      <div style="font-weight:700;color:var(--red);font-size:13px;margin-bottom:4px">⚠ Overclaiming detected</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5">
+        You marked <b>${r.fakeKnown}/${r.fakeTotal}</b> fake words as "Know it". Your score has been adjusted down by ${Math.round((1-r.correction)*100)}%. Consider re-taking with stricter honesty.
+      </div>
+    </div>
+    ` : `
+    <div class="card mb" style="background:rgba(0,184,148,.06);border:1px solid var(--green)">
+      <div style="font-size:12px;color:var(--text2)">
+        ✓ Honesty check passed — fake-word rate ${Math.round(r.fakeYesRate*100)}% (low). Your score is reliable.
+      </div>
+    </div>
+    `}
+
+    <h3 style="margin:16px 0 8px">Heatmap</h3>
+    <div style="overflow-x:auto;margin-bottom:8px">
+      <table style="width:100%;border-collapse:separate;border-spacing:2px;font-size:11px">
+        <thead>
+          <tr>
+            <td style="width:28%"></td>
+            ${VMAP_BANDS.map(b => '<td style="text-align:center;font-size:10px;color:var(--text3);font-weight:600;padding:4px;width:18%">'+b+'</td>').join('')}
+          </tr>
+        </thead>
+        <tbody>${heatmapRows}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px;font-size:10px;color:var(--text3);margin-bottom:16px;flex-wrap:wrap">
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#00b894;border-radius:2px"></span>≥80%</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#fdcb6e;border-radius:2px"></span>60-79%</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#e17055;border-radius:2px"></span>40-59%</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#d63031;border-radius:2px"></span>20-39%</span>
+      <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#2d3436;border-radius:2px"></span>&lt;20%</span>
+    </div>
+
+    ${(vtest.words && vtest.words.length > 0) ? `
+    <div class="card mb">
+      <h3 style="margin:0 0 8px">Add to your library?</h3>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.5">
+        I can add the tested words to your vocab library with the right SRS status:
+        <b style="color:var(--green)">Know</b> → Mastered ·
+        <b style="color:var(--orange)">Unsure</b> → Learning ·
+        <b style="color:var(--text3)">Don't know</b> → New (will appear in quizzes)
+      </p>
+      <button class="btn mb" onclick="commitAndShowSummary()" style="width:100%">Add to Library</button>
+      <button class="btn btn-ghost btn-sm" onclick="vtest=null;goTo('home')" style="width:100%">Skip — just keep the score</button>
+    </div>
+    ` : `
+    <button class="btn btn-ghost mb" onclick="vtest=null;goTo('vtest')" style="width:100%">Take Test Again</button>
+    <button class="btn btn-ghost btn-sm" onclick="vtest=null;goTo('home')" style="width:100%">Back to Home</button>
+    `}
+  `;
+}
+
+function commitAndShowSummary(){
+  const result = commitVocabTestToLibrary();
+  toast('Added ' + result.added + ' words: ' + result.mastered + ' mastered, ' + result.learning + ' learning, ' + result.newCount + ' new');
+  vtest = null;
+  goTo('words');
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if(currentScreen !== 'vtest' || !vtest || vtest.step !== 'running') return;
+  if(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  if(e.key === 'ArrowLeft'){ e.preventDefault(); answerVocabTest('know'); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); answerVocabTest('unsure'); }
+  else if(e.key === 'ArrowRight' || e.key === 'ArrowDown'){ e.preventDefault(); answerVocabTest('unknown'); }
+});
 
 // ===== INIT =====
 window.addEventListener('DOMContentLoaded', () => {

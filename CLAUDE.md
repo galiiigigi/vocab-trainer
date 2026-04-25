@@ -1,6 +1,6 @@
 # Canadian English Vocabulary Trainer
 
-Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inline. Hosted on GitHub Pages.
+Main app: `vocab-trainer.html` (~7143 lines). PWA manifest & icons generated inline. Hosted on GitHub Pages.
 
 ## Files
 - `vocab-trainer.html` — the entire app (HTML/CSS/JS + inline PWA manifest/icons)
@@ -10,6 +10,7 @@ Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inl
 ## Architecture
 - Single HTML/CSS/JS file, no build tools
 - localStorage persistence (`vocabApp` key)
+- **IndexedDB** (`vocabAudio` DB) for Story Mode audio blob cache
 - Gemini API (configurable model via `state.settings.geminiModel`) for AI features
 - Google Cloud TTS + browser TTS fallback
 - GitHub Gist cloud sync via Personal Access Token + REST API
@@ -26,6 +27,7 @@ Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inl
 - `state.settings` — API keys, theme, voice, thresholds
 - `state.ttsUsage` — monthly character tracking
 - `state.dailyActivity{}` — heatmap data
+- `state.listeningHistory[]` — Story Mode generated passages (id, format, passage, words, vibe, audioKey, createdAt, lastPlayed, plays). LRU cap via `state.settings.storyMaxHistory` (default 200)
 - Sync format: v3 with selective export (words/progress/settings/stats/apiKeys) — clipboard + .json file + GitHub Gist
 - Gist sync uses 5 save slots (`vocab-slot-1.json` through `vocab-slot-5.json`) in a single gist; old `vocab-sync.json` shown as loadable "Legacy" entry
 - API key stripping: `SENSITIVE_KEYS` (`apiKey`, `googleTtsKey`, `githubGistToken`) excluded from sync by default; opt-in via "API Keys" checkbox
@@ -83,6 +85,9 @@ Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inl
 - **Language Parent** (~6185): `startLanguageParent()` — Chris Lonsdale method, recasts instead of correcting, simple language, body language cues
 - **Word Mixing Drill** (~6215): `startWordMixing()` — combine 2-3 words into sentences, AI evaluates, SRS+XP
 - **Brain Soak** (~6372): `startBrainSoak()` — passive immersion, plays sentences on loop with repeat, speed/loop controls
+- **Story Mode** (~1280-1670): `openStoryMode()`, `generateStory(format)`, `renderStoryScreen()`, `renderStoryPlayer()`, `playStory()`. Two formats: Podcast monologue + Interview Q&A. 10 vibes per format rotated silently. Non-mastered words only via `pickNonMasteredWords(5)`. Audio cached in IndexedDB → replays = 0 TTS quota. Library UI with LRU-capped history. Entry: Input tab → Passive Immersion section
+- **Vocab Map** (~7136 onwards): `startVocabTest()`, `answerVocabTest()`, `computeVocabEstimate()`, `commitVocabTestToLibrary()`, `renderVocabTest()`. Frequency × domain matrix test (7 domains × up to 5 bands ≈ 27 cells). Word bank inline (~330 real words across daily/academic/business/canadian/literary/colloquial/phrasal + 30 fake-word distractors). Lextale-style fake correction (penalizes overclaiming). Output: total estimate + CEFR + 7×5 heatmap. Test results commit into vocab library with proper SRS status (Know→Mastered interval=21d, Unsure→Learning interval=3d, Don't know→New). Entry: Home screen "Vocab Map" button. State: `vtest` global + `state.vmapHistory[]` (capped at 20).
+- **Audio Cache** (~914): `openAudioDB()` + `audioDB.{put,get,delete,listKeys}` IndexedDB wrapper, `base64ToBlob()` helper
 - **Add Word from Chat** (~3870): showAddWordFromChatModal, addSuggestedWord, addAllSuggestedWords
 - **AI Explain** (~3935): aiExplainWord for word detail
 - **AI Rephrase** (~5168): `aiRephraseWord()` single + `batchRephraseWords()` batch, with undo
@@ -91,7 +96,10 @@ Main app: `vocab-trainer.html` (~5400 lines). PWA manifest & icons generated inl
 - **Init** (~4010): DOMContentLoaded → rebuildWords, applyTheme, goTo('home'), SW register, initNotifications
 
 ## Bottom Nav
-Home | Quiz | Cards | Words | Settings (Stats accessible via stat boxes on home)
+Home | Output | Input | Words | Settings (Stats accessible via stat boxes on home)
+
+- **Output tab:** speaking/active production modes (chats, drills, scenarios)
+- **Input tab:** listening/passive intake. Sections: Passive Immersion (Brain Soak, Story) / Active Listening (Audio Quiz, Listen Cards, Listening Comprehension) / Ear Training (Dictation, Minimal Pairs)
 
 ## Key Patterns
 - `formatMultiDef(def)` — numbered definitions for combined/multi-meaning words
@@ -116,6 +124,12 @@ Home | Quiz | Cards | Words | Settings (Stats accessible via stat boxes on home)
 - `startWordMixing()` — word combo drill, 2-3 words → sentence → AI eval
 - `startBrainSoak()` / `stopBrainSoak()` — passive sentence immersion player
 - `brainSoakPlayNext()` — plays sentence twice (normal + slow), auto-advances
+- `openStoryMode()` — Story Mode entry (nav to `screen-story`)
+- `pickNonMasteredWords(n)` — returns random N words with status !== 'mastered'
+- `generateStory(format)` — orchestrator: picks words + vibe, calls Gemini, saves to `state.listeningHistory`, preloads audio
+- `fetchAndCacheStoryAudio(text, key)` — fetch Google TTS → save Blob to IndexedDB
+- `playStory()` — cache-aware playback (hit = 0 quota; miss = fetch + cache)
+- `STORY_FORMATS` / `VIBES_PODCAST` / `VIBES_INTERVIEW` — format registry + vibe pools
 - `showAddWordFromChatModal()` — save word during chat with AI auto-fill
 - `endSessionEarly(mode)` — End button for quiz, cards, voice, ear
 - `dontKnowQuiz()` — reveals answer without guessing, records quality 0
