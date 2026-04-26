@@ -7688,19 +7688,33 @@ function renderVocabTestResults(el){
 
     ${(vtest.words && vtest.words.length > 0) ? `
     <div class="card mb">
-      <h3 style="margin:0 0 8px">Add to your library?</h3>
+      <h3 style="margin:0 0 8px">Step 1 — Add tested words to your library</h3>
       <p style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.5">
-        I can add the tested words to your vocab library with the right SRS status:
+        Adds the ~${vtest.words.filter(w=>!w.isFake).length} words I just tested with the right SRS status:
         <b style="color:var(--green)">Know</b> → Mastered ·
         <b style="color:var(--orange)">Unsure</b> → Learning ·
-        <b style="color:var(--text3)">Don't know</b> → New (will appear in quizzes)
+        <b style="color:var(--text3)">Don't know</b> → New
       </p>
-      <button class="btn mb" onclick="commitAndShowSummary()" style="width:100%">Add to Library</button>
-      <button class="btn btn-ghost btn-sm" onclick="vtest=null;goTo('home')" style="width:100%">Skip — just keep the score</button>
+      <button class="btn mb" onclick="commitAndShowSummary()" style="width:100%">Add Tested Words to Library</button>
     </div>
-    ` : `
+    ` : ''}
+
+    <div class="card mb" style="background:linear-gradient(135deg,var(--bg2),rgba(9,132,227,.08));border:1px solid var(--blue)">
+      <h3 style="margin:0 0 8px;color:var(--blue)">Step 2 — Bulk-Import a Frequency List</h3>
+      <p style="font-size:12px;color:var(--text2);margin:0 0 12px;line-height:1.5">
+        Use your heatmap to <b>auto-classify</b> common-word lists. Each word gets a status (Mastered / Familiar / Learning / New) based on your cell scores. Includes a spot check to catch over-claims.
+      </p>
+      <button class="btn mb" onclick="startBulkImport('ngsl-1k')" style="width:100%;background:linear-gradient(135deg,var(--blue),#0984e3)">
+        Import NGSL 1K (top 1000 words) ${VMAP_NGSL_1K.length === 0 ? '— pending data' : '— ' + VMAP_NGSL_1K.length + ' words'}
+      </button>
+      <div style="font-size:10px;color:var(--text3);margin-top:6px">More lists coming: NGSL 2-3K (1800 words), COCA 4-6K (1000 words)</div>
+    </div>
+
+    ${!(vtest.words && vtest.words.length > 0) ? `
     <button class="btn btn-ghost mb" onclick="vtest=null;goTo('vtest')" style="width:100%">Take Test Again</button>
     <button class="btn btn-ghost btn-sm" onclick="vtest=null;goTo('home')" style="width:100%">Back to Home</button>
+    ` : `
+    <button class="btn btn-ghost btn-sm" onclick="vtest=null;goTo('home')" style="width:100%">Done</button>
     `}
   `;
 }
@@ -7720,6 +7734,823 @@ document.addEventListener('keydown', (e) => {
   else if(e.key === 'ArrowUp'){ e.preventDefault(); answerVocabTest('unsure'); }
   else if(e.key === 'ArrowRight' || e.key === 'ArrowDown'){ e.preventDefault(); answerVocabTest('unknown'); }
 });
+
+// ===== BULK IMPORT FROM VOCAB MAP =====
+// Uses last vmap test results to bulk-add frequency-list words with inferred SRS status.
+// Each entry: {w:word, d:short definition, e:example sentence, dom:domain tag, b:band, p:phonetic optional}
+// VMAP_NGSL_1K populated separately (large data block)
+// NGSL 1K — top ~1000 most common English words, hand-authored definitions/examples.
+// Domain tags: daily (default), business (work/money), academic (school/learning),
+// canadian (CA-specific workplace), colloquial (casual speech), phrasal (multi-word verbs).
+const VMAP_NGSL_1K = [
+{w:'the',d:'used before a specific noun',e:'The manager is in the office.',dom:'daily',b:'1K'},
+{w:'be',d:'to exist or have a quality',e:'I want to be ready by Friday.',dom:'daily',b:'1K'},
+{w:'and',d:'used to connect words or phrases',e:'I work mornings and weekends.',dom:'daily',b:'1K'},
+{w:'a',d:'used before any single thing',e:'I need a break.',dom:'daily',b:'1K'},
+{w:'of',d:'belonging to or about something',e:'A friend of mine works here.',dom:'daily',b:'1K'},
+{w:'in',d:'inside something or a place',e:'My keys are in the drawer.',dom:'daily',b:'1K'},
+{w:'to',d:'toward a person, place or thing',e:'I drive to work every morning.',dom:'daily',b:'1K'},
+{w:'have',d:'to own or hold something',e:'I have a meeting at 2pm.',dom:'daily',b:'1K'},
+{w:'it',d:'a thing already mentioned',e:'I lost my badge — did you find it?',dom:'daily',b:'1K'},
+{w:'I',d:'the speaker themselves',e:'I work in receiving.',dom:'daily',b:'1K'},
+{w:'that',d:'the one already mentioned',e:'That is my supervisor.',dom:'daily',b:'1K'},
+{w:'for',d:'used to show purpose or recipient',e:'This package is for the night shift.',dom:'daily',b:'1K'},
+{w:'you',d:'the person being addressed',e:'You can take the next break.',dom:'daily',b:'1K'},
+{w:'he',d:'a male person already mentioned',e:'He is the new hire.',dom:'daily',b:'1K'},
+{w:'with',d:'together with someone or something',e:'I work with Sarah on Thursdays.',dom:'daily',b:'1K'},
+{w:'on',d:'touching the surface of something',e:'Put the box on the pallet.',dom:'daily',b:'1K'},
+{w:'do',d:'to perform an action',e:'What do you do for a living?',dom:'daily',b:'1K'},
+{w:'say',d:'to speak words aloud',e:'My boss said the meeting is canceled.',dom:'daily',b:'1K'},
+{w:'this',d:'the one near or just mentioned',e:'This is the new schedule.',dom:'daily',b:'1K'},
+{w:'they',d:'a group of people already mentioned',e:'They start at 6am.',dom:'daily',b:'1K'},
+{w:'at',d:'in a specific place or time',e:'I work at the warehouse.',dom:'daily',b:'1K'},
+{w:'but',d:'used to show contrast',e:'I want to come, but I am tired.',dom:'daily',b:'1K'},
+{w:'we',d:'the speaker and others',e:'We need to finish by noon.',dom:'daily',b:'1K'},
+{w:'his',d:'belonging to a male person',e:'His shift ends at 4pm.',dom:'daily',b:'1K'},
+{w:'from',d:'starting at a place or time',e:'The package is from Vancouver.',dom:'daily',b:'1K'},
+{w:'not',d:'used to make negative',e:'I am not on the schedule today.',dom:'daily',b:'1K'},
+{w:'by',d:'next to, or done by someone',e:'The report was written by my manager.',dom:'daily',b:'1K'},
+{w:'she',d:'a female person already mentioned',e:'She covers the morning shift.',dom:'daily',b:'1K'},
+{w:'or',d:'used to show alternative',e:'Coffee or tea?',dom:'daily',b:'1K'},
+{w:'as',d:'in the same way as something',e:'He works as a forklift operator.',dom:'daily',b:'1K'},
+{w:'what',d:'used to ask about something',e:'What time is your break?',dom:'daily',b:'1K'},
+{w:'go',d:'to move from one place to another',e:'I need to go to the bank.',dom:'daily',b:'1K'},
+{w:'their',d:'belonging to a group',e:'Their store closes at 9pm.',dom:'daily',b:'1K'},
+{w:'can',d:'to be able to do something',e:'Can you cover my shift?',dom:'daily',b:'1K'},
+{w:'who',d:'used to ask about a person',e:'Who is on tonight?',dom:'daily',b:'1K'},
+{w:'get',d:'to obtain or receive',e:'I need to get a new uniform.',dom:'daily',b:'1K'},
+{w:'if',d:'used to introduce a condition',e:'If it rains, the delivery is delayed.',dom:'daily',b:'1K'},
+{w:'would',d:'used to talk about possibility',e:'I would help if I had time.',dom:'daily',b:'1K'},
+{w:'her',d:'belonging to a female person',e:'Her phone number is on the form.',dom:'daily',b:'1K'},
+{w:'all',d:'every one of a group',e:'All staff must attend the safety meeting.',dom:'daily',b:'1K'},
+{w:'my',d:'belonging to me',e:'My shift starts at 7am.',dom:'daily',b:'1K'},
+{w:'make',d:'to create or produce',e:'I made coffee for everyone.',dom:'daily',b:'1K'},
+{w:'about',d:'concerning a topic',e:'Let me tell you about the project.',dom:'daily',b:'1K'},
+{w:'know',d:'to have information about something',e:'Do you know the new hire?',dom:'daily',b:'1K'},
+{w:'will',d:'used for future actions',e:'I will be there at 8 sharp.',dom:'daily',b:'1K'},
+{w:'up',d:'toward a higher position',e:'Please pick up the box.',dom:'daily',b:'1K'},
+{w:'one',d:'the number 1',e:'I need one more pallet.',dom:'daily',b:'1K'},
+{w:'time',d:'minutes, hours, days passing',e:'What time do you finish?',dom:'daily',b:'1K'},
+{w:'there',d:'in or to that place',e:'Put the box over there.',dom:'daily',b:'1K'},
+{w:'year',d:'a period of 12 months',e:'I have worked here for one year.',dom:'daily',b:'1K'},
+{w:'so',d:'very, or to the extent that',e:'The shift was so busy today.',dom:'daily',b:'1K'},
+{w:'think',d:'to use the mind',e:'I think we should leave early.',dom:'daily',b:'1K'},
+{w:'when',d:'at what time',e:'When does the truck arrive?',dom:'daily',b:'1K'},
+{w:'which',d:'used to choose between things',e:'Which aisle has the boxes?',dom:'daily',b:'1K'},
+{w:'them',d:'people or things already mentioned',e:'Tell them I will be late.',dom:'daily',b:'1K'},
+{w:'some',d:'an amount of something',e:'I need some help with this load.',dom:'daily',b:'1K'},
+{w:'me',d:'the speaker as object',e:'Tell me when you are done.',dom:'daily',b:'1K'},
+{w:'people',d:'human beings in general',e:'Many people work the night shift.',dom:'daily',b:'1K'},
+{w:'take',d:'to move or carry something',e:'Take this to receiving, please.',dom:'daily',b:'1K'},
+{w:'out',d:'away from the inside of a place',e:'The forklift went out of the warehouse.',dom:'daily',b:'1K'},
+{w:'into',d:'moving toward the inside of',e:'Load it into the truck.',dom:'daily',b:'1K'},
+{w:'just',d:'only, or very recently',e:'I just finished my shift.',dom:'daily',b:'1K'},
+{w:'see',d:'to use the eyes to notice',e:'I saw the new schedule.',dom:'daily',b:'1K'},
+{w:'him',d:'a male as the object',e:'I told him about the change.',dom:'daily',b:'1K'},
+{w:'your',d:'belonging to you',e:'What is your locker number?',dom:'daily',b:'1K'},
+{w:'come',d:'to move toward the speaker',e:'Come over here a sec.',dom:'daily',b:'1K'},
+{w:'could',d:'used for past possibility',e:'I could help you tomorrow.',dom:'daily',b:'1K'},
+{w:'now',d:'at this moment',e:'I need it now, not later.',dom:'daily',b:'1K'},
+{w:'than',d:'used in comparisons',e:'This shift is busier than last week.',dom:'daily',b:'1K'},
+{w:'like',d:'similar to, or to enjoy',e:'I like working mornings.',dom:'daily',b:'1K'},
+{w:'other',d:'different from the one mentioned',e:'The other manager handles nights.',dom:'daily',b:'1K'},
+{w:'how',d:'in what way',e:'How do you operate this machine?',dom:'daily',b:'1K'},
+{w:'then',d:'at that time, or after that',e:'Finish the report, then go home.',dom:'daily',b:'1K'},
+{w:'its',d:'belonging to a thing',e:'The truck has a problem with its engine.',dom:'daily',b:'1K'},
+{w:'our',d:'belonging to us',e:'This is our team meeting room.',dom:'daily',b:'1K'},
+{w:'two',d:'the number 2',e:'Two people called in sick today.',dom:'daily',b:'1K'},
+{w:'more',d:'a greater amount',e:'We need more boxes from storage.',dom:'daily',b:'1K'},
+{w:'these',d:'the ones near the speaker',e:'These pallets need to go out.',dom:'daily',b:'1K'},
+{w:'want',d:'to wish for something',e:'I want a coffee before the meeting.',dom:'daily',b:'1K'},
+{w:'way',d:'a method or direction',e:'This is the right way to load it.',dom:'daily',b:'1K'},
+{w:'look',d:'to direct your eyes',e:'Look at this report.',dom:'daily',b:'1K'},
+{w:'first',d:'before all others',e:'I get the first break at 10am.',dom:'daily',b:'1K'},
+{w:'also',d:'in addition to that',e:'I also speak Mandarin.',dom:'daily',b:'1K'},
+{w:'new',d:'recently made or learned',e:'She is the new supervisor.',dom:'daily',b:'1K'},
+{w:'because',d:'for the reason that',e:'I am late because of traffic.',dom:'daily',b:'1K'},
+{w:'day',d:'24 hours; daytime',e:'Have a good day at work.',dom:'daily',b:'1K'},
+{w:'use',d:'to do something with a tool',e:'Use the scanner for each box.',dom:'daily',b:'1K'},
+{w:'no',d:'not any; the opposite of yes',e:'No, I cannot work tonight.',dom:'daily',b:'1K'},
+{w:'man',d:'an adult male person',e:'The man at the gate has my badge.',dom:'daily',b:'1K'},
+{w:'find',d:'to discover or locate',e:'Can you find the missing order?',dom:'daily',b:'1K'},
+{w:'here',d:'in this place',e:'Sign here, please.',dom:'daily',b:'1K'},
+{w:'thing',d:'an object or matter',e:'The main thing is safety.',dom:'daily',b:'1K'},
+{w:'give',d:'to hand something over',e:'Give the form to HR.',dom:'daily',b:'1K'},
+{w:'many',d:'a large number of',e:'Many of us work weekends.',dom:'daily',b:'1K'},
+{w:'well',d:'in a good way',e:'She trains new staff well.',dom:'daily',b:'1K'},
+{w:'only',d:'no more than; just',e:'Only one break per shift.',dom:'daily',b:'1K'},
+{w:'those',d:'the ones over there',e:'Those boxes are damaged.',dom:'daily',b:'1K'},
+{w:'tell',d:'to share information by speaking',e:'Tell HR if you are sick.',dom:'daily',b:'1K'},
+{w:'very',d:'to a high degree',e:'It is very busy on Fridays.',dom:'daily',b:'1K'},
+{w:'even',d:'used to add emphasis',e:'I even came in on my day off.',dom:'daily',b:'1K'},
+{w:'back',d:'returning, or behind',e:'I will be back in 15 minutes.',dom:'daily',b:'1K'},
+{w:'any',d:'one or some, no matter which',e:'Any of you can help me.',dom:'daily',b:'1K'},
+{w:'good',d:'of high quality; pleasant',e:'You did a good job today.',dom:'daily',b:'1K'},
+{w:'woman',d:'an adult female person',e:'The woman in receiving is my trainer.',dom:'daily',b:'1K'},
+{w:'through',d:'from one side to the other',e:'Walk through the warehouse to aisle 3.',dom:'daily',b:'1K'},
+{w:'us',d:'the speaker and others as object',e:'Tell us when the truck arrives.',dom:'daily',b:'1K'},
+{w:'life',d:'the time someone is alive',e:'Work-life balance matters here.',dom:'daily',b:'1K'},
+{w:'child',d:'a young person',e:'My child goes to daycare nearby.',dom:'daily',b:'1K'},
+{w:'work',d:'a job or task done for pay',e:'I start work at 6am.',dom:'business',b:'1K'},
+{w:'down',d:'toward a lower position',e:'Please put the box down here.',dom:'daily',b:'1K'},
+{w:'may',d:'used for permission or possibility',e:'May I leave early today?',dom:'daily',b:'1K'},
+{w:'after',d:'later than something',e:'I work out after my shift.',dom:'daily',b:'1K'},
+{w:'should',d:'used for recommendation',e:'You should wear safety boots.',dom:'daily',b:'1K'},
+{w:'call',d:'to phone or shout to someone',e:'Call HR if there is a problem.',dom:'daily',b:'1K'},
+{w:'world',d:'the planet, or all of life',e:'People come here from all over the world.',dom:'daily',b:'1K'},
+{w:'over',d:'above, or finished',e:'My shift is over at 4.',dom:'daily',b:'1K'},
+{w:'school',d:'a place for learning',e:'I went to school in Vancouver.',dom:'academic',b:'1K'},
+{w:'still',d:'continuing as before',e:'I am still on my break.',dom:'daily',b:'1K'},
+{w:'try',d:'to attempt to do something',e:'Try the scanner on aisle 2.',dom:'daily',b:'1K'},
+{w:'last',d:'final, or most recent',e:'Last week was hectic.',dom:'daily',b:'1K'},
+{w:'ask',d:'to request information',e:'Ask your supervisor for the schedule.',dom:'daily',b:'1K'},
+{w:'need',d:'to require something',e:'I need a new pair of gloves.',dom:'daily',b:'1K'},
+{w:'too',d:'also, or to a high degree',e:'It is too cold in the freezer.',dom:'daily',b:'1K'},
+{w:'feel',d:'to experience an emotion or sense',e:'I feel tired after a double shift.',dom:'daily',b:'1K'},
+{w:'three',d:'the number 3',e:'I have three weeks of vacation.',dom:'daily',b:'1K'},
+{w:'state',d:'a condition; a region',e:'The state of the warehouse is good.',dom:'daily',b:'1K'},
+{w:'never',d:'not at any time',e:'I never miss a shift.',dom:'daily',b:'1K'},
+{w:'become',d:'to start to be something',e:'She became supervisor last year.',dom:'daily',b:'1K'},
+{w:'between',d:'in the middle of two things',e:'My break is between 10 and 10:15.',dom:'daily',b:'1K'},
+{w:'high',d:'tall, or at a great height',e:'The shelves are very high.',dom:'daily',b:'1K'},
+{w:'really',d:'truly, or very',e:'It is really cold today.',dom:'daily',b:'1K'},
+{w:'something',d:'a thing not specified',e:'I need to tell you something.',dom:'daily',b:'1K'},
+{w:'most',d:'the greatest amount',e:'Most days are like this.',dom:'daily',b:'1K'},
+{w:'another',d:'one more; a different one',e:'I need another scanner.',dom:'daily',b:'1K'},
+{w:'much',d:'a large amount',e:'I do not have much time.',dom:'daily',b:'1K'},
+{w:'family',d:'parents, children, relatives',e:'My family lives in Toronto.',dom:'daily',b:'1K'},
+{w:'own',d:'belonging to oneself',e:'I bring my own coffee.',dom:'daily',b:'1K'},
+{w:'leave',d:'to go away from',e:'I leave at 4pm sharp.',dom:'daily',b:'1K'},
+{w:'put',d:'to place something somewhere',e:'Put your bag in the locker.',dom:'daily',b:'1K'},
+{w:'old',d:'having existed a long time',e:'This forklift is old but works.',dom:'daily',b:'1K'},
+{w:'while',d:'during the time that',e:'I read while on break.',dom:'daily',b:'1K'},
+{w:'mean',d:'to express; unkind',e:'What does that abbreviation mean?',dom:'daily',b:'1K'},
+{w:'keep',d:'to continue to have or do',e:'Keep your safety vest on.',dom:'daily',b:'1K'},
+{w:'student',d:'a person who studies',e:'I was a student in the UK.',dom:'academic',b:'1K'},
+{w:'why',d:'for what reason',e:'Why is the truck late?',dom:'daily',b:'1K'},
+{w:'let',d:'to allow',e:'Let me know when you are ready.',dom:'daily',b:'1K'},
+{w:'great',d:'very good or large',e:'You did a great job.',dom:'daily',b:'1K'},
+{w:'same',d:'exactly alike',e:'I worked the same shift last week.',dom:'daily',b:'1K'},
+{w:'big',d:'large in size',e:'That is a big delivery.',dom:'daily',b:'1K'},
+{w:'group',d:'a collection of people or things',e:'My group handles inbound.',dom:'business',b:'1K'},
+{w:'begin',d:'to start',e:'My shift begins at 7am.',dom:'daily',b:'1K'},
+{w:'seem',d:'to appear to be',e:'You seem tired today.',dom:'daily',b:'1K'},
+{w:'country',d:'a nation',e:'Canada is a big country.',dom:'daily',b:'1K'},
+{w:'help',d:'to assist someone',e:'Can you help me lift this box?',dom:'daily',b:'1K'},
+{w:'talk',d:'to speak with someone',e:'Let us talk after work.',dom:'daily',b:'1K'},
+{w:'where',d:'at what place',e:'Where do I sign in?',dom:'daily',b:'1K'},
+{w:'turn',d:'to change direction',e:'Turn left at the loading dock.',dom:'daily',b:'1K'},
+{w:'problem',d:'a difficult situation',e:'There is a problem with the scanner.',dom:'daily',b:'1K'},
+{w:'every',d:'each one without exception',e:'Every shift has a safety check.',dom:'daily',b:'1K'},
+{w:'start',d:'to begin doing something',e:'I start at 6am.',dom:'daily',b:'1K'},
+{w:'hand',d:'the part of the body at the wrist',e:'Wash your hands before lunch.',dom:'daily',b:'1K'},
+{w:'might',d:'possibly will happen',e:'I might stay late tonight.',dom:'daily',b:'1K'},
+{w:'show',d:'to let someone see',e:'Let me show you the route.',dom:'daily',b:'1K'},
+{w:'part',d:'a piece of something',e:'Part of the order is missing.',dom:'daily',b:'1K'},
+{w:'against',d:'opposed to; touching',e:'Lean the boxes against the wall.',dom:'daily',b:'1K'},
+{w:'place',d:'a location',e:'Put it in a safe place.',dom:'daily',b:'1K'},
+{w:'such',d:'of that kind',e:'Such things happen sometimes.',dom:'daily',b:'1K'},
+{w:'again',d:'one more time',e:'The truck is late again.',dom:'daily',b:'1K'},
+{w:'few',d:'a small number of',e:'Just a few minutes left.',dom:'daily',b:'1K'},
+{w:'case',d:'a situation; a box for things',e:'In any case, finish your task.',dom:'daily',b:'1K'},
+{w:'week',d:'seven days',e:'I work five days a week.',dom:'daily',b:'1K'},
+{w:'company',d:'a business',e:'My company is hiring.',dom:'business',b:'1K'},
+{w:'system',d:'a set of related things',e:'The new system tracks every box.',dom:'business',b:'1K'},
+{w:'each',d:'every one',e:'Each pallet has a label.',dom:'daily',b:'1K'},
+{w:'right',d:'correct; opposite of left',e:'Take a right after the entrance.',dom:'daily',b:'1K'},
+{w:'program',d:'a plan; software',e:'The training program is two weeks.',dom:'business',b:'1K'},
+{w:'hear',d:'to perceive sound',e:'I hear the truck pulling in.',dom:'daily',b:'1K'},
+{w:'question',d:'a sentence asking for information',e:'I have a question about overtime.',dom:'daily',b:'1K'},
+{w:'during',d:'throughout a period of time',e:'No phones during the safety meeting.',dom:'daily',b:'1K'},
+{w:'play',d:'to do something for fun',e:'My kids play after school.',dom:'daily',b:'1K'},
+{w:'government',d:'the people who run a country',e:'The government changed the labor laws.',dom:'daily',b:'1K'},
+{w:'run',d:'to move quickly with the legs',e:'I run for the bus every morning.',dom:'daily',b:'1K'},
+{w:'small',d:'little in size',e:'A small package arrived for you.',dom:'daily',b:'1K'},
+{w:'number',d:'a count; figure',e:'My employee number is on the badge.',dom:'daily',b:'1K'},
+{w:'off',d:'away from; not on',e:'My shift is off on Sundays.',dom:'daily',b:'1K'},
+{w:'always',d:'at all times',e:'Always wear your safety boots.',dom:'daily',b:'1K'},
+{w:'move',d:'to change position',e:'Move the pallets to bay 3.',dom:'daily',b:'1K'},
+{w:'night',d:'the time when it is dark',e:'I worked the night shift twice.',dom:'daily',b:'1K'},
+{w:'live',d:'to have life; to dwell',e:'I live near the warehouse.',dom:'daily',b:'1K'},
+{w:'point',d:'a specific moment or place',e:'At this point, the order is closed.',dom:'daily',b:'1K'},
+{w:'believe',d:'to think something is true',e:'I believe the order is correct.',dom:'daily',b:'1K'},
+{w:'hold',d:'to have in your hand',e:'Hold this end of the box.',dom:'daily',b:'1K'},
+{w:'today',d:'on this day',e:'Today is busier than yesterday.',dom:'daily',b:'1K'},
+{w:'bring',d:'to carry to a place',e:'Bring your ID on the first day.',dom:'daily',b:'1K'},
+{w:'happen',d:'to occur',e:'The accident happened on aisle 4.',dom:'daily',b:'1K'},
+{w:'must',d:'have to; required',e:'You must wear PPE in this zone.',dom:'daily',b:'1K'},
+{w:'father',d:'a male parent',e:'My father runs a small business.',dom:'daily',b:'1K'},
+{w:'mother',d:'a female parent',e:'My mother is visiting from China.',dom:'daily',b:'1K'},
+{w:'home',d:'the place where one lives',e:'I am heading home after this.',dom:'daily',b:'1K'},
+{w:'service',d:'help given to customers',e:'Customer service handles complaints.',dom:'business',b:'1K'},
+{w:'friend',d:'a person you like and know well',e:'My friend works at IKEA too.',dom:'daily',b:'1K'},
+{w:'set',d:'to put in place; a group',e:'Set the boxes by the door.',dom:'daily',b:'1K'},
+{w:'next',d:'coming after this one',e:'Next week is my vacation.',dom:'daily',b:'1K'},
+{w:'love',d:'a strong feeling of caring',e:'I love working with this team.',dom:'daily',b:'1K'},
+{w:'meet',d:'to come together with someone',e:'Meet me at the entrance at 9.',dom:'daily',b:'1K'},
+{w:'include',d:'to have as part of a whole',e:'The list includes all part-timers.',dom:'business',b:'1K'},
+{w:'continue',d:'to keep doing something',e:'Continue the task after lunch.',dom:'business',b:'1K'},
+{w:'change',d:'to make different',e:'They changed the schedule again.',dom:'daily',b:'1K'},
+{w:'kind',d:'type; nice in nature',e:'What kind of work do you do?',dom:'daily',b:'1K'},
+{w:'four',d:'the number 4',e:'I work four days a week.',dom:'daily',b:'1K'},
+{w:'head',d:'the top part of the body',e:'Mind your head near the low shelves.',dom:'daily',b:'1K'},
+{w:'far',d:'a long distance away',e:'The store is not far from here.',dom:'daily',b:'1K'},
+{w:'black',d:'the darkest color',e:'I wear black work pants.',dom:'daily',b:'1K'},
+{w:'long',d:'measuring a lot of length or time',e:'It was a long shift.',dom:'daily',b:'1K'},
+{w:'both',d:'the two together',e:'Both supervisors agreed.',dom:'daily',b:'1K'},
+{w:'little',d:'small in size or amount',e:'I need a little more time.',dom:'daily',b:'1K'},
+{w:'house',d:'a building where people live',e:'I bought a small house in Burnaby.',dom:'daily',b:'1K'},
+{w:'yes',d:'agreeing; affirmative answer',e:'Yes, I can stay late.',dom:'daily',b:'1K'},
+{w:'since',d:'from a time in the past',e:'I have worked here since January.',dom:'daily',b:'1K'},
+{w:'provide',d:'to give what is needed',e:'They provide gloves and boots.',dom:'business',b:'1K'},
+{w:'around',d:'in a circle; nearby',e:'Look around for the missing scanner.',dom:'daily',b:'1K'},
+{w:'large',d:'big',e:'A large delivery is coming today.',dom:'daily',b:'1K'},
+{w:'among',d:'surrounded by others',e:'Among new hires, training is required.',dom:'daily',b:'1K'},
+{w:'second',d:'after the first',e:'I get a second break at 2pm.',dom:'daily',b:'1K'},
+{w:'enough',d:'as much as needed',e:'I have had enough coffee.',dom:'daily',b:'1K'},
+{w:'face',d:'the front of the head',e:'A friendly face at the front desk.',dom:'daily',b:'1K'},
+{w:'watch',d:'to look at carefully',e:'Watch your step on wet floors.',dom:'daily',b:'1K'},
+{w:'reach',d:'to arrive at; stretch out for',e:'I cannot reach the top shelf.',dom:'daily',b:'1K'},
+{w:'stop',d:'to cease moving',e:'Stop the forklift if you see a person.',dom:'daily',b:'1K'},
+{w:'open',d:'not closed',e:'The store opens at 10am.',dom:'daily',b:'1K'},
+{w:'consider',d:'to think about carefully',e:'Consider the schedule before agreeing.',dom:'business',b:'1K'},
+{w:'word',d:'a unit of language',e:'I do not know that word.',dom:'academic',b:'1K'},
+{w:'study',d:'to learn by reading and thinking',e:'I study English every evening.',dom:'academic',b:'1K'},
+{w:'develop',d:'to grow or improve',e:'I want to develop better English skills.',dom:'business',b:'1K'},
+{w:'minute',d:'60 seconds; one of 60 in an hour',e:'Give me one minute.',dom:'daily',b:'1K'},
+{w:'quite',d:'fairly; completely',e:'It is quite cold in the freezer.',dom:'daily',b:'1K'},
+{w:'eye',d:'the part of the body for seeing',e:'Keep an eye on the loading bay.',dom:'daily',b:'1K'},
+{w:'sit',d:'to rest with the body bent',e:'Please sit during the meeting.',dom:'daily',b:'1K'},
+{w:'water',d:'the clear liquid we drink',e:'Drink water often during your shift.',dom:'daily',b:'1K'},
+{w:'pay',d:'to give money for something',e:'They pay every two weeks.',dom:'business',b:'1K'},
+{w:'side',d:'one of the surfaces of an object',e:'The label is on the side of the box.',dom:'daily',b:'1K'},
+{w:'walk',d:'to move on foot at normal speed',e:'I walk to work most days.',dom:'daily',b:'1K'},
+{w:'remember',d:'to keep in your mind',e:'Remember to log out of the system.',dom:'daily',b:'1K'},
+{w:'idea',d:'a thought or plan',e:'I have an idea for the new layout.',dom:'business',b:'1K'},
+{w:'increase',d:'to make or become greater',e:'Sales increased last quarter.',dom:'business',b:'1K'},
+{w:'serve',d:'to help or work for someone',e:'I serve customers at the till.',dom:'business',b:'1K'},
+{w:'almost',d:'nearly but not completely',e:'I am almost done with this aisle.',dom:'daily',b:'1K'},
+{w:'cover',d:'to put something over',e:'Cover the boxes with the tarp.',dom:'daily',b:'1K'},
+{w:'human',d:'relating to people',e:'Human Resources is on the second floor.',dom:'daily',b:'1K'},
+{w:'job',d:'paid work',e:'I got the job at IKEA.',dom:'business',b:'1K'},
+{w:'lose',d:'to no longer have',e:'Do not lose your locker key.',dom:'daily',b:'1K'},
+{w:'expect',d:'to think something will happen',e:'I expect a busy shift today.',dom:'business',b:'1K'},
+{w:'stand',d:'to be on your feet',e:'I stand all day at work.',dom:'daily',b:'1K'},
+{w:'understand',d:'to know what something means',e:'I understand the safety rules.',dom:'daily',b:'1K'},
+{w:'office',d:'a place where business is done',e:'HR office is on the second floor.',dom:'business',b:'1K'},
+{w:'soon',d:'in a short time',e:'The truck arrives soon.',dom:'daily',b:'1K'},
+{w:'maybe',d:'perhaps; possibly',e:'Maybe I can cover your shift.',dom:'daily',b:'1K'},
+{w:'send',d:'to make something go to a place',e:'Send the form to HR.',dom:'business',b:'1K'},
+{w:'door',d:'an opening into a room or building',e:'The back door is for staff only.',dom:'daily',b:'1K'},
+{w:'create',d:'to make something new',e:'I created a new schedule.',dom:'business',b:'1K'},
+{w:'allow',d:'to let someone do something',e:'Phones are not allowed on the floor.',dom:'business',b:'1K'},
+{w:'die',d:'to stop living',e:'My old laptop just died.',dom:'daily',b:'1K'},
+{w:'whole',d:'all of something',e:'I worked the whole weekend.',dom:'daily',b:'1K'},
+{w:'true',d:'real; not false',e:'It is true — they are hiring more.',dom:'daily',b:'1K'},
+{w:'less',d:'a smaller amount',e:'I work less on weekends.',dom:'daily',b:'1K'},
+{w:'public',d:'for everyone to use',e:'Public transit gets me here in 20 min.',dom:'daily',b:'1K'},
+{w:'order',d:'a request for goods',e:'The order is missing two items.',dom:'business',b:'1K'},
+{w:'hour',d:'60 minutes',e:'My break is one hour.',dom:'daily',b:'1K'},
+{w:'six',d:'the number 6',e:'I work six hours on Saturdays.',dom:'daily',b:'1K'},
+{w:'paper',d:'thin material for writing',e:'Sign the paper at the front desk.',dom:'daily',b:'1K'},
+{w:'name',d:'what someone is called',e:'Write your name on the sign-in sheet.',dom:'daily',b:'1K'},
+{w:'five',d:'the number 5',e:'Five minutes until break.',dom:'daily',b:'1K'},
+{w:'across',d:'from one side to the other',e:'The break room is across the floor.',dom:'daily',b:'1K'},
+{w:'room',d:'a part of a building with walls',e:'The break room has coffee.',dom:'daily',b:'1K'},
+{w:'level',d:'a degree or floor',e:'The HR office is on level 2.',dom:'business',b:'1K'},
+{w:'speak',d:'to say words',e:'I speak Mandarin and English.',dom:'daily',b:'1K'},
+{w:'business',d:'commercial activity',e:'This is a busy business in summer.',dom:'business',b:'1K'},
+{w:'stay',d:'to remain in a place',e:'Stay in your zone, please.',dom:'daily',b:'1K'},
+{w:'care',d:'to feel concern or interest',e:'I care about doing my job well.',dom:'daily',b:'1K'},
+{w:'lot',d:'a large amount',e:'A lot of new hires this month.',dom:'daily',b:'1K'},
+{w:'pretty',d:'fairly; attractive',e:'It is pretty cold this morning.',dom:'daily',b:'1K'},
+{w:'easy',d:'not difficult',e:'This task is easy once you learn it.',dom:'daily',b:'1K'},
+{w:'reason',d:'a cause or explanation',e:'What is the reason for the delay?',dom:'daily',b:'1K'},
+{w:'mind',d:'the part of you that thinks',e:'Keep safety in mind at all times.',dom:'daily',b:'1K'},
+{w:'sure',d:'certain',e:'Are you sure about that order?',dom:'daily',b:'1K'},
+{w:'bad',d:'not good',e:'Today was a bad shift — too many delays.',dom:'daily',b:'1K'},
+{w:'plan',d:'an arrangement of what to do',e:'What is the plan for tomorrow?',dom:'business',b:'1K'},
+{w:'list',d:'a series of items',e:'Here is the list of pending orders.',dom:'business',b:'1K'},
+{w:'morning',d:'the early part of the day',e:'I start work in the morning.',dom:'daily',b:'1K'},
+{w:'early',d:'before the usual time',e:'I came in early today.',dom:'daily',b:'1K'},
+{w:'late',d:'after the expected time',e:'Sorry I am late — bus issues.',dom:'daily',b:'1K'},
+{w:'low',d:'not high',e:'The shelves are low in this aisle.',dom:'daily',b:'1K'},
+{w:'red',d:'the color of blood',e:'The red light means stop.',dom:'daily',b:'1K'},
+{w:'short',d:'not long',e:'It will be a short shift today.',dom:'daily',b:'1K'},
+{w:'kid',d:'a child; informal',e:'My kid is at school all day.',dom:'colloquial',b:'1K'},
+{w:'finish',d:'to complete',e:'Finish the aisle before lunch.',dom:'daily',b:'1K'},
+{w:'price',d:'how much something costs',e:'The price is on the tag.',dom:'business',b:'1K'},
+{w:'sound',d:'something heard',e:'I hear a strange sound from the engine.',dom:'daily',b:'1K'},
+{w:'free',d:'no cost; not busy',e:'Coffee is free in the break room.',dom:'daily',b:'1K'},
+{w:'common',d:'happening often',e:'Forklift accidents are not common here.',dom:'daily',b:'1K'},
+{w:'fact',d:'something known to be true',e:'The fact is, we need more staff.',dom:'daily',b:'1K'},
+{w:'half',d:'one of two equal parts',e:'I am half done with the aisle.',dom:'daily',b:'1K'},
+// ===== Verbs (more common) =====
+{w:'read',d:'to look at words and understand',e:'Read the safety sign before entering.',dom:'daily',b:'1K'},
+{w:'write',d:'to put words on paper or screen',e:'Write your name at the top.',dom:'daily',b:'1K'},
+{w:'learn',d:'to gain knowledge or skill',e:'I am learning the new system.',dom:'academic',b:'1K'},
+{w:'teach',d:'to give knowledge to someone',e:'She teaches new hires the safety rules.',dom:'academic',b:'1K'},
+{w:'listen',d:'to pay attention to sound',e:'Listen carefully to the announcement.',dom:'daily',b:'1K'},
+{w:'eat',d:'to put food in the mouth',e:'I eat lunch at noon.',dom:'daily',b:'1K'},
+{w:'drink',d:'to swallow liquid',e:'Drink water during your shift.',dom:'daily',b:'1K'},
+{w:'buy',d:'to get something with money',e:'I buy coffee on the way to work.',dom:'business',b:'1K'},
+{w:'sell',d:'to give in exchange for money',e:'They sell furniture and household goods.',dom:'business',b:'1K'},
+{w:'cost',d:'the price of something',e:'How much does this cost?',dom:'business',b:'1K'},
+{w:'spend',d:'to give money for something',e:'I spend an hour commuting each way.',dom:'business',b:'1K'},
+{w:'sleep',d:'to rest with eyes closed',e:'I sleep six hours on work nights.',dom:'daily',b:'1K'},
+{w:'wake',d:'to stop sleeping',e:'I wake up at 5am for early shifts.',dom:'daily',b:'1K'},
+{w:'cook',d:'to prepare food using heat',e:'I cook dinner every night.',dom:'daily',b:'1K'},
+{w:'wash',d:'to clean with water',e:'Wash your hands before lunch.',dom:'daily',b:'1K'},
+{w:'drive',d:'to operate a vehicle',e:'I drive to work in winter.',dom:'daily',b:'1K'},
+{w:'travel',d:'to go from one place to another',e:'I travel to Mexico to see my partner.',dom:'daily',b:'1K'},
+{w:'visit',d:'to go to see someone',e:'My mother is visiting next week.',dom:'daily',b:'1K'},
+{w:'arrive',d:'to come to a place',e:'The truck arrives at 8am.',dom:'business',b:'1K'},
+{w:'enter',d:'to come into',e:'Enter through the staff door.',dom:'business',b:'1K'},
+{w:'follow',d:'to go after; to obey',e:'Follow the safety procedure.',dom:'business',b:'1K'},
+{w:'lead',d:'to guide or direct',e:'She leads the morning team.',dom:'business',b:'1K'},
+{w:'wait',d:'to stay until something happens',e:'Wait for the truck to fully stop.',dom:'daily',b:'1K'},
+{w:'jump',d:'to push off the ground',e:'Do not jump off the forklift.',dom:'daily',b:'1K'},
+{w:'push',d:'to use force to move forward',e:'Push the cart, do not pull it.',dom:'daily',b:'1K'},
+{w:'pull',d:'to move toward yourself',e:'Pull the lever to lower the lift.',dom:'daily',b:'1K'},
+{w:'lift',d:'to raise something up',e:'Lift with your legs, not your back.',dom:'canadian',b:'1K'},
+{w:'carry',d:'to hold while moving',e:'Carry only what is safe.',dom:'daily',b:'1K'},
+{w:'drop',d:'to let something fall',e:'Do not drop the box on your foot.',dom:'daily',b:'1K'},
+{w:'throw',d:'to send through the air',e:'Throw the trash in the bin.',dom:'daily',b:'1K'},
+{w:'catch',d:'to grab something moving',e:'Catch the box before it falls.',dom:'daily',b:'1K'},
+{w:'kick',d:'to hit with the foot',e:'Do not kick the boxes.',dom:'daily',b:'1K'},
+{w:'hit',d:'to strike with force',e:'The forklift hit the wall.',dom:'daily',b:'1K'},
+{w:'fix',d:'to repair',e:'Can you fix the broken scanner?',dom:'daily',b:'1K'},
+{w:'build',d:'to make from parts',e:'They are building a new warehouse.',dom:'business',b:'1K'},
+{w:'cut',d:'to divide with a sharp tool',e:'Cut the box tape carefully.',dom:'daily',b:'1K'},
+{w:'sing',d:'to make music with the voice',e:'My coworker sings while she works.',dom:'daily',b:'1K'},
+{w:'win',d:'to come first; to gain',e:'I won a gift card at the staff draw.',dom:'daily',b:'1K'},
+{w:'enjoy',d:'to take pleasure in',e:'I enjoy working with this team.',dom:'daily',b:'1K'},
+{w:'hate',d:'to dislike strongly',e:'I hate when the truck is late.',dom:'daily',b:'1K'},
+{w:'hope',d:'to wish for something good',e:'I hope my shift ends on time.',dom:'daily',b:'1K'},
+{w:'wish',d:'to want something',e:'I wish I had more time off.',dom:'daily',b:'1K'},
+{w:'dream',d:'to imagine; thoughts in sleep',e:'I dream of a quiet weekend.',dom:'daily',b:'1K'},
+{w:'agree',d:'to have the same opinion',e:'I agree with the new schedule.',dom:'business',b:'1K'},
+{w:'add',d:'to put together',e:'Add this box to the next shipment.',dom:'business',b:'1K'},
+{w:'remove',d:'to take away',e:'Remove the broken pallet from the floor.',dom:'business',b:'1K'},
+{w:'check',d:'to look at to verify',e:'Check the order before you ship it.',dom:'business',b:'1K'},
+{w:'count',d:'to find a number',e:'Count the items before signing.',dom:'business',b:'1K'},
+{w:'measure',d:'to find size or amount',e:'Measure the box before shipping.',dom:'business',b:'1K'},
+{w:'choose',d:'to pick one',e:'Choose any locker on this row.',dom:'daily',b:'1K'},
+{w:'decide',d:'to make a choice',e:'I decided to take the night shift.',dom:'business',b:'1K'},
+// ===== Family / People =====
+{w:'parent',d:'a mother or father',e:'My parents live in China.',dom:'daily',b:'1K'},
+{w:'son',d:'a male child',e:'My son is in college.',dom:'daily',b:'1K'},
+{w:'daughter',d:'a female child',e:'Her daughter just started kindergarten.',dom:'daily',b:'1K'},
+{w:'brother',d:'a male sibling',e:'My brother lives in Tokyo.',dom:'daily',b:'1K'},
+{w:'sister',d:'a female sibling',e:'My sister is a doctor.',dom:'daily',b:'1K'},
+{w:'wife',d:'a married female partner',e:'My wife works downtown.',dom:'daily',b:'1K'},
+{w:'husband',d:'a married male partner',e:'Her husband stays home with the kids.',dom:'daily',b:'1K'},
+{w:'baby',d:'a very young child',e:'My coworker has a new baby.',dom:'daily',b:'1K'},
+{w:'boy',d:'a young male',e:'A boy was waiting at the gate.',dom:'daily',b:'1K'},
+{w:'girl',d:'a young female',e:'A girl asked for the manager.',dom:'daily',b:'1K'},
+{w:'team',d:'a group working together',e:'My team handles inbound goods.',dom:'business',b:'1K'},
+{w:'manager',d:'a person in charge of others',e:'My manager approves time off.',dom:'business',b:'1K'},
+{w:'boss',d:'the person you work for',e:'My boss is on vacation this week.',dom:'business',b:'1K'},
+{w:'customer',d:'a person who buys from a business',e:'Greet every customer politely.',dom:'business',b:'1K'},
+{w:'staff',d:'the people who work at a place',e:'All staff must wear safety boots.',dom:'business',b:'1K'},
+{w:'worker',d:'a person who works',e:'A new worker joined our shift today.',dom:'business',b:'1K'},
+{w:'guy',d:'a man; informal',e:'That guy is my new co-worker.',dom:'colloquial',b:'1K'},
+{w:'someone',d:'an unspecified person',e:'Someone left a coffee on my desk.',dom:'daily',b:'1K'},
+{w:'anyone',d:'any person',e:'Has anyone seen my badge?',dom:'daily',b:'1K'},
+{w:'everyone',d:'every person',e:'Everyone needs to sign the form.',dom:'daily',b:'1K'},
+{w:'nobody',d:'no person',e:'Nobody answered the phone.',dom:'daily',b:'1K'},
+// ===== Body =====
+{w:'body',d:'the physical structure of a person',e:'Stretch your body before lifting.',dom:'daily',b:'1K'},
+{w:'arm',d:'the upper limb of the body',e:'Use both arms to lift the box.',dom:'daily',b:'1K'},
+{w:'leg',d:'the lower limb of the body',e:'Lift with your legs.',dom:'daily',b:'1K'},
+{w:'foot',d:'the part at the bottom of the leg',e:'A box fell on his foot.',dom:'daily',b:'1K'},
+{w:'finger',d:'one of five parts on the hand',e:'I cut my finger on the cardboard.',dom:'daily',b:'1K'},
+{w:'mouth',d:'the opening for eating and speaking',e:'Cover your mouth when you cough.',dom:'daily',b:'1K'},
+{w:'ear',d:'the part of the body for hearing',e:'Wear ear protection in this zone.',dom:'canadian',b:'1K'},
+{w:'nose',d:'the part of the face for breathing',e:'I caught a cold — runny nose.',dom:'daily',b:'1K'},
+{w:'tooth',d:'a hard white object in the mouth',e:'I have a tooth ache today.',dom:'daily',b:'1K'},
+{w:'hair',d:'the thin strands on the head',e:'Tie your hair back near machinery.',dom:'canadian',b:'1K'},
+{w:'skin',d:'the body covering',e:'Wear gloves to protect your skin.',dom:'daily',b:'1K'},
+{w:'heart',d:'the organ that pumps blood',e:'Rest if your heart races.',dom:'daily',b:'1K'},
+// ===== Time =====
+{w:'month',d:'one of 12 parts of a year',e:'I started this job last month.',dom:'daily',b:'1K'},
+{w:'weekend',d:'Saturday and Sunday',e:'I work most weekends.',dom:'canadian',b:'1K'},
+{w:'tomorrow',d:'the day after today',e:'Tomorrow I have a day off.',dom:'daily',b:'1K'},
+{w:'yesterday',d:'the day before today',e:'Yesterday was a slow shift.',dom:'daily',b:'1K'},
+{w:'tonight',d:'the night of today',e:'I work tonight until 11pm.',dom:'daily',b:'1K'},
+{w:'evening',d:'the late part of the day',e:'I take English class in the evening.',dom:'daily',b:'1K'},
+{w:'noon',d:'twelve in the middle of the day',e:'My lunch is at noon.',dom:'daily',b:'1K'},
+{w:'midnight',d:'twelve at night',e:'My night shift ends at midnight.',dom:'daily',b:'1K'},
+{w:'season',d:'one of four parts of a year',e:'Winter is my busiest season here.',dom:'daily',b:'1K'},
+{w:'summer',d:'the warmest season',e:'Summer is busy at the warehouse.',dom:'daily',b:'1K'},
+{w:'winter',d:'the cold season',e:'Winter mornings are tough in BC.',dom:'canadian',b:'1K'},
+{w:'spring',d:'the season after winter',e:'Spring brings more orders.',dom:'daily',b:'1K'},
+{w:'fall',d:'autumn; to drop down',e:'Be careful, the floor is slippery.',dom:'daily',b:'1K'},
+{w:'Monday',d:'the first work day of the week',e:'Mondays are always busy here.',dom:'daily',b:'1K'},
+{w:'Friday',d:'the last work day before weekend',e:'TGI Friday — short shift today.',dom:'colloquial',b:'1K'},
+{w:'Saturday',d:'the day after Friday',e:'I work most Saturdays.',dom:'canadian',b:'1K'},
+{w:'Sunday',d:'the second weekend day',e:'Sundays are quieter at the store.',dom:'canadian',b:'1K'},
+// ===== Food / drink =====
+{w:'food',d:'something to eat',e:'I bring food from home.',dom:'daily',b:'1K'},
+{w:'meal',d:'food eaten at one time',e:'A staff meal is provided on long shifts.',dom:'canadian',b:'1K'},
+{w:'breakfast',d:'the morning meal',e:'I eat breakfast before work.',dom:'daily',b:'1K'},
+{w:'lunch',d:'the midday meal',e:'My lunch break is 30 minutes.',dom:'canadian',b:'1K'},
+{w:'dinner',d:'the evening meal',e:'I eat dinner after my shift.',dom:'daily',b:'1K'},
+{w:'coffee',d:'a hot drink made from beans',e:'Coffee is free in the break room.',dom:'canadian',b:'1K'},
+{w:'tea',d:'a hot drink made from leaves',e:'I prefer tea over coffee.',dom:'daily',b:'1K'},
+{w:'milk',d:'white liquid from cows',e:'Add milk to my coffee, please.',dom:'daily',b:'1K'},
+{w:'bread',d:'food made from baked flour',e:'Bread is on aisle 2.',dom:'daily',b:'1K'},
+{w:'rice',d:'small white grains used as food',e:'I eat rice with most meals.',dom:'daily',b:'1K'},
+{w:'meat',d:'food from animals',e:'The fridge keeps meat at safe temperature.',dom:'daily',b:'1K'},
+{w:'fish',d:'an animal that lives in water',e:'BC has lots of fresh fish.',dom:'daily',b:'1K'},
+{w:'fruit',d:'sweet food from plants',e:'I bring fruit for snacks.',dom:'daily',b:'1K'},
+// ===== Common adjectives =====
+{w:'happy',d:'feeling joy',e:'I am happy with my new shift.',dom:'daily',b:'1K'},
+{w:'sad',d:'feeling sorrow',e:'She looked sad after the meeting.',dom:'daily',b:'1K'},
+{w:'angry',d:'feeling strong displeasure',e:'The customer was angry about the wait.',dom:'daily',b:'1K'},
+{w:'sorry',d:'feeling regret',e:'Sorry I am late.',dom:'daily',b:'1K'},
+{w:'tired',d:'needing rest',e:'I am tired after a double shift.',dom:'daily',b:'1K'},
+{w:'busy',d:'having a lot to do',e:'Friday afternoons are always busy.',dom:'daily',b:'1K'},
+{w:'ready',d:'prepared',e:'I am ready to start.',dom:'daily',b:'1K'},
+{w:'hot',d:'high temperature',e:'The freezer aisle is not hot at all.',dom:'daily',b:'1K'},
+{w:'cold',d:'low temperature',e:'It is cold in the loading dock today.',dom:'daily',b:'1K'},
+{w:'warm',d:'a comfortable temperature',e:'Wear warm layers in winter.',dom:'daily',b:'1K'},
+{w:'wet',d:'covered in liquid',e:'Be careful — the floor is wet.',dom:'canadian',b:'1K'},
+{w:'dry',d:'not wet',e:'Keep the boxes dry.',dom:'daily',b:'1K'},
+{w:'dirty',d:'not clean',e:'My uniform is dirty by lunch.',dom:'daily',b:'1K'},
+{w:'safe',d:'not in danger',e:'Lift safely or you will hurt your back.',dom:'canadian',b:'1K'},
+{w:'dangerous',d:'likely to cause harm',e:'Speeding on a forklift is dangerous.',dom:'canadian',b:'1K'},
+{w:'fast',d:'moving quickly',e:'The conveyor moves too fast.',dom:'daily',b:'1K'},
+{w:'slow',d:'not fast',e:'Today is a slow day.',dom:'daily',b:'1K'},
+{w:'heavy',d:'weighing a lot',e:'That box is too heavy to carry alone.',dom:'canadian',b:'1K'},
+{w:'strong',d:'powerful',e:'You need strong arms for this job.',dom:'daily',b:'1K'},
+{w:'weak',d:'not strong',e:'My back feels weak after lifting.',dom:'daily',b:'1K'},
+{w:'rich',d:'having a lot of money',e:'No one gets rich working here.',dom:'colloquial',b:'1K'},
+{w:'poor',d:'having little money',e:'Poor signage caused the confusion.',dom:'daily',b:'1K'},
+{w:'cheap',d:'not expensive',e:'Cheap boots wear out fast.',dom:'business',b:'1K'},
+{w:'expensive',d:'costing a lot of money',e:'Steel-toed boots are expensive.',dom:'business',b:'1K'},
+{w:'beautiful',d:'pleasing to look at',e:'Vancouver has beautiful mountains.',dom:'daily',b:'1K'},
+{w:'simple',d:'not complex',e:'The task is simple once you learn it.',dom:'daily',b:'1K'},
+{w:'difficult',d:'hard to do',e:'It is difficult to lift on your own.',dom:'daily',b:'1K'},
+{w:'important',d:'of great value',e:'Safety is the most important rule.',dom:'business',b:'1K'},
+{w:'special',d:'better than normal',e:'Today has a special promotion.',dom:'daily',b:'1K'},
+{w:'normal',d:'usual or expected',e:'A normal shift is 8 hours.',dom:'daily',b:'1K'},
+{w:'best',d:'better than all others',e:'Today was my best shift this week.',dom:'daily',b:'1K'},
+{w:'worst',d:'worse than all others',e:'Friday was the worst — too understaffed.',dom:'daily',b:'1K'},
+// ===== Colors =====
+{w:'white',d:'the color of snow',e:'White boxes are for fragile items.',dom:'daily',b:'1K'},
+{w:'blue',d:'the color of the sky',e:'The blue label means inbound.',dom:'business',b:'1K'},
+{w:'green',d:'the color of grass',e:'Green light means safe to enter.',dom:'canadian',b:'1K'},
+{w:'yellow',d:'the color of the sun',e:'Yellow tape marks pedestrian zones.',dom:'canadian',b:'1K'},
+{w:'brown',d:'the color of wood',e:'Brown boxes are most common.',dom:'daily',b:'1K'},
+{w:'gray',d:'between black and white',e:'My uniform shirt is gray.',dom:'daily',b:'1K'},
+// ===== Numbers (more) =====
+{w:'seven',d:'the number 7',e:'I work seven hours today.',dom:'daily',b:'1K'},
+{w:'eight',d:'the number 8',e:'My shift is eight hours.',dom:'daily',b:'1K'},
+{w:'nine',d:'the number 9',e:'It is already nine in the morning.',dom:'daily',b:'1K'},
+{w:'ten',d:'the number 10',e:'Ten minutes until break.',dom:'daily',b:'1K'},
+{w:'twenty',d:'the number 20',e:'Twenty pallets came in today.',dom:'daily',b:'1K'},
+{w:'hundred',d:'the number 100',e:'A hundred orders shipped today.',dom:'business',b:'1K'},
+{w:'thousand',d:'the number 1000',e:'The store had a thousand customers.',dom:'business',b:'1K'},
+{w:'million',d:'the number 1,000,000',e:'A million dollars in inventory.',dom:'business',b:'1K'},
+// ===== Common nouns (places, things) =====
+{w:'city',d:'a large town',e:'I live in a big city.',dom:'daily',b:'1K'},
+{w:'town',d:'a small populated area',e:'I grew up in a small town.',dom:'daily',b:'1K'},
+{w:'street',d:'a road in a town or city',e:'The store is on Main Street.',dom:'daily',b:'1K'},
+{w:'road',d:'a way for vehicles',e:'The road was icy this morning.',dom:'canadian',b:'1K'},
+{w:'building',d:'a structure with walls and a roof',e:'Our building has three floors.',dom:'business',b:'1K'},
+{w:'floor',d:'the surface you walk on',e:'Watch the wet floor sign.',dom:'daily',b:'1K'},
+{w:'wall',d:'a vertical structure of a building',e:'The schedule is on the wall.',dom:'daily',b:'1K'},
+{w:'window',d:'an opening with glass',e:'Open the window for air.',dom:'daily',b:'1K'},
+{w:'table',d:'a flat-topped piece of furniture',e:'Lunch is on the break room table.',dom:'daily',b:'1K'},
+{w:'chair',d:'a seat with a back',e:'Bring a chair from the meeting room.',dom:'daily',b:'1K'},
+{w:'bed',d:'furniture for sleeping',e:'I am ready to go to bed.',dom:'daily',b:'1K'},
+{w:'kitchen',d:'a room for cooking',e:'The break room has a kitchen.',dom:'daily',b:'1K'},
+{w:'bathroom',d:'a room with a toilet',e:'The bathroom is at the back.',dom:'daily',b:'1K'},
+{w:'shop',d:'a place that sells things',e:'I run a small shop on weekends.',dom:'business',b:'1K'},
+{w:'store',d:'a shop',e:'The store opens at 10am.',dom:'business',b:'1K'},
+{w:'market',d:'a place where people sell goods',e:'The market opens early Saturday.',dom:'business',b:'1K'},
+{w:'bank',d:'a place that holds money',e:'The bank is around the corner.',dom:'business',b:'1K'},
+{w:'hospital',d:'a place that treats sick people',e:'The hospital is 10 minutes away.',dom:'daily',b:'1K'},
+{w:'church',d:'a building for religious services',e:'The church has an English class.',dom:'daily',b:'1K'},
+{w:'park',d:'a public green space',e:'I walk in the park before work.',dom:'daily',b:'1K'},
+{w:'station',d:'a place trains or buses stop',e:'The bus station is close by.',dom:'daily',b:'1K'},
+{w:'airport',d:'a place where planes arrive',e:'I drove my mother to the airport.',dom:'daily',b:'1K'},
+{w:'restaurant',d:'a place to buy a meal',e:'There is a restaurant near the warehouse.',dom:'daily',b:'1K'},
+{w:'hotel',d:'a place to stay overnight',e:'I stayed at a hotel during training.',dom:'daily',b:'1K'},
+// ===== Vehicles & transport =====
+{w:'car',d:'a vehicle with four wheels',e:'I drive my car to work.',dom:'daily',b:'1K'},
+{w:'bus',d:'a large vehicle for many passengers',e:'I take the bus when it snows.',dom:'canadian',b:'1K'},
+{w:'train',d:'a long vehicle on rails',e:'The train station is downtown.',dom:'daily',b:'1K'},
+{w:'plane',d:'a flying vehicle',e:'I fly to Mexico every few months.',dom:'daily',b:'1K'},
+{w:'truck',d:'a large vehicle for goods',e:'The truck is unloading at bay 3.',dom:'canadian',b:'1K'},
+{w:'bike',d:'a two-wheeled vehicle',e:'I ride my bike when the weather is good.',dom:'daily',b:'1K'},
+// ===== Communication =====
+{w:'email',d:'electronic mail',e:'Check your email for the new policy.',dom:'business',b:'1K'},
+{w:'letter',d:'a written message',e:'A letter came from CRA.',dom:'canadian',b:'1K'},
+{w:'message',d:'information sent to someone',e:'Leave a message with HR.',dom:'business',b:'1K'},
+{w:'news',d:'new information',e:'Good news — they extended my contract.',dom:'daily',b:'1K'},
+{w:'story',d:'a description of events',e:'Tell me the story of how you got hired.',dom:'daily',b:'1K'},
+{w:'language',d:'the words people speak',e:'I speak two languages.',dom:'academic',b:'1K'},
+// ===== Weather =====
+{w:'weather',d:'the state of the air outside',e:'The weather is rough today.',dom:'canadian',b:'1K'},
+{w:'rain',d:'water falling from clouds',e:'Heavy rain delayed the truck.',dom:'canadian',b:'1K'},
+{w:'snow',d:'white frozen rain',e:'Snow makes the lot slippery.',dom:'canadian',b:'1K'},
+{w:'wind',d:'moving air',e:'Strong wind today — be careful with doors.',dom:'daily',b:'1K'},
+{w:'sun',d:'the star in our sky',e:'The sun rose at 6 this morning.',dom:'daily',b:'1K'},
+{w:'cloud',d:'water vapor in the sky',e:'Clouds are moving in.',dom:'daily',b:'1K'},
+// ===== Money =====
+{w:'money',d:'coins and bills used for buying',e:'I save money every paycheck.',dom:'business',b:'1K'},
+{w:'dollar',d:'unit of money in Canada and US',e:'A coffee costs five dollars now.',dom:'canadian',b:'1K'},
+{w:'cash',d:'money in coin or paper form',e:'We do not keep much cash on site.',dom:'canadian',b:'1K'},
+{w:'card',d:'a small flat piece of plastic',e:'Tap your card at the entrance.',dom:'business',b:'1K'},
+{w:'tax',d:'money paid to the government',e:'Taxes come off every paycheck.',dom:'canadian',b:'1K'},
+// ===== Common items =====
+{w:'thanks',d:'expression of gratitude',e:'Thanks for covering my shift.',dom:'colloquial',b:'1K'},
+{w:'okay',d:'all right; agreement',e:'Okay, see you Monday.',dom:'colloquial',b:'1K'},
+{w:'yeah',d:'yes; informal',e:'Yeah, I can do that.',dom:'colloquial',b:'1K'},
+{w:'hello',d:'a greeting',e:'Hello, welcome to the team.',dom:'daily',b:'1K'},
+{w:'goodbye',d:'a parting word',e:'Goodbye, see you tomorrow.',dom:'daily',b:'1K'},
+{w:'please',d:'used in polite request',e:'Please sign at the bottom.',dom:'daily',b:'1K'},
+{w:'key',d:'a tool to open a lock',e:'Do not lose your locker key.',dom:'daily',b:'1K'},
+{w:'box',d:'a container with sides',e:'Put the box on the pallet.',dom:'daily',b:'1K'},
+{w:'bag',d:'a soft container for carrying',e:'Bring a bag for your lunch.',dom:'daily',b:'1K'},
+{w:'cup',d:'a small container for drinks',e:'Coffee cups are by the machine.',dom:'daily',b:'1K'},
+{w:'glass',d:'a hard clear material',e:'Wear glasses if needed for the small print.',dom:'daily',b:'1K'},
+{w:'computer',d:'an electronic machine',e:'Sign in at the computer near the door.',dom:'business',b:'1K'},
+{w:'machine',d:'a tool with moving parts',e:'Do not touch the machine without training.',dom:'canadian',b:'1K'},
+{w:'tool',d:'something used to do work',e:'Return tools to the rack after use.',dom:'canadian',b:'1K'},
+{w:'pallet',d:'a flat platform for moving boxes',e:'Wrap each pallet before shipping.',dom:'canadian',b:'1K'},
+{w:'fire',d:'flames; high heat',e:'Know the fire exits.',dom:'canadian',b:'1K'},
+{w:'air',d:'gas around us',e:'Open a door for some fresh air.',dom:'daily',b:'1K'},
+{w:'tree',d:'a tall plant with branches',e:'A tree fell on the road.',dom:'daily',b:'1K'},
+{w:'flower',d:'the colorful part of a plant',e:'My team gave me flowers for my birthday.',dom:'daily',b:'1K'},
+{w:'animal',d:'a living creature',e:'No animals allowed in the warehouse.',dom:'daily',b:'1K'},
+{w:'dog',d:'a common pet animal',e:'My neighbor has a friendly dog.',dom:'daily',b:'1K'},
+{w:'cat',d:'a small pet animal',e:'A cat lives near the loading dock.',dom:'daily',b:'1K'},
+];
+
+function inferStatusFromVmap(domain, band){
+  // Returns 'mastered'|'familiar'|'learning'|'beginner'|'new' based on last test's cell or band score.
+  if(!state.vmapHistory || state.vmapHistory.length === 0) return 'new';
+  const last = state.vmapHistory[state.vmapHistory.length - 1];
+
+  // Try cell-specific first (domain × band)
+  let pct = null;
+  if(last.cellStats){
+    const cell = last.cellStats[domain + '|' + band];
+    if(cell && cell.total > 0){
+      pct = cell.knownPct;
+    }
+  }
+  // Fallback: band aggregate across all domains
+  if(pct === null && last.bandStats){
+    const ba = last.bandStats[band];
+    if(ba && ba.total > 0){
+      pct = (ba.known + (ba.unsure||0)*0.4) / ba.total * 100;
+    }
+  }
+  if(pct === null) return 'new';
+
+  if(pct >= 80) return 'mastered';
+  if(pct >= 60) return 'familiar';
+  if(pct >= 40) return 'learning';
+  if(pct >= 20) return 'beginner';
+  return 'new';
+}
+
+function statusToProgress(status, now){
+  if(status === 'mastered') return {interval:21, easeFactor:2.5, nextReview:now+21*86400000, repetitions:4, lastQuality:5, lastRT:null};
+  if(status === 'familiar') return {interval:10, easeFactor:2.4, nextReview:now+10*86400000, repetitions:3, lastQuality:4, lastRT:null};
+  if(status === 'learning') return {interval:3,  easeFactor:2.3, nextReview:now+3*86400000,  repetitions:2, lastQuality:3, lastRT:null};
+  if(status === 'beginner') return {interval:1,  easeFactor:2.3, nextReview:now+1*86400000,  repetitions:1, lastQuality:2, lastRT:null};
+  return null; // 'new' → no wordProgress entry
+}
+
+let bulkImport = null; // {step, wordList, plan, spotCheckIdx, spotCheckResults}
+
+function startBulkImport(listKey){
+  const lists = {
+    'ngsl-1k': {data:VMAP_NGSL_1K, label:'NGSL 1K (most common 1000 words)'},
+  };
+  const chosen = lists[listKey];
+  if(!chosen || chosen.data.length === 0){
+    toast('That word list is not yet bundled. Coming in next update.');
+    return;
+  }
+  // Compute plan
+  const existingLower = new Set([
+    ...((state.customWords||[]).map(w => w.word.toLowerCase())),
+    ...((WORDS_RAW||[]).map(w => w[0].toLowerCase()))
+  ]);
+  const buckets = {mastered:[], familiar:[], learning:[], beginner:[], new:[], skipped:[]};
+  chosen.data.forEach(entry => {
+    if(existingLower.has(entry.w.toLowerCase())){
+      buckets.skipped.push(entry);
+      return;
+    }
+    const status = inferStatusFromVmap(entry.dom, entry.b);
+    buckets[status].push(entry);
+  });
+  bulkImport = {
+    step:'preview',
+    listKey,
+    listLabel:chosen.label,
+    wordList:chosen.data,
+    plan:buckets,
+    spotCheckIdx:0,
+    spotCheckResults:[],
+    downgrade:false
+  };
+  renderBulkImportScreen();
+}
+
+function renderBulkImportScreen(){
+  // Render in a modal overlay (no new screen needed)
+  const root = document.getElementById('modal-root');
+  if(!bulkImport){ root.style.display = 'none'; return; }
+  if(bulkImport.step === 'preview') renderBulkPreview(root);
+  else if(bulkImport.step === 'spotcheck') renderBulkSpotCheck(root);
+  else if(bulkImport.step === 'done') renderBulkDone(root);
+  root.style.display = 'flex';
+}
+
+function renderBulkPreview(root){
+  const p = bulkImport.plan;
+  const total = p.mastered.length + p.familiar.length + p.learning.length + p.beginner.length + p.new.length;
+  root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this){bulkImport=null;renderBulkImportScreen();}">
+    <div class="modal" style="max-width:520px;max-height:90vh;overflow-y:auto">
+      <h3 style="margin:0 0 4px">Bulk Import Preview</h3>
+      <p style="font-size:12px;color:var(--text3);margin:0 0 12px">${bulkImport.listLabel}</p>
+
+      <div style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Will add <b style="color:var(--accent)">${total}</b> new words to your library:</div>
+        ${[
+          ['mastered','Mastered','#00b894','21d interval, skip early review'],
+          ['familiar','Familiar','#27ae60','10d interval'],
+          ['learning','Learning','#fdcb6e','3d interval, mid priority'],
+          ['beginner','Beginner','#e17055','1d interval, soon'],
+          ['new','New','#636e72','no progress, will appear in quizzes'],
+        ].map(([k,lab,c,desc]) => p[k].length > 0 ? `
+          <div style="display:flex;align-items:baseline;gap:8px;padding:4px 0">
+            <span style="display:inline-block;width:10px;height:10px;background:${c};border-radius:2px;flex-shrink:0"></span>
+            <span style="font-weight:600;color:${c}">${p[k].length}</span>
+            <span style="font-size:12px">${lab}</span>
+            <span style="font-size:11px;color:var(--text3);flex:1">— ${desc}</span>
+          </div>` : '').join('')}
+        ${p.skipped.length > 0 ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bg3);font-size:11px;color:var(--text3)">${p.skipped.length} already in your library — skipped</div>` : ''}
+      </div>
+
+      <div style="background:rgba(255,165,0,.06);border:1px solid var(--orange);border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.5">
+        <b style="color:var(--orange)">Spot check next:</b> Before committing, you'll verify a random sample of words I'm marking as "Mastered". If you fail too many, the import gets scaled back to "Familiar" automatically.
+      </div>
+
+      ${p.mastered.length === 0 ? `
+        <button class="btn mb" onclick="executeBulkImport()" style="width:100%">Skip Spot Check & Commit</button>
+      ` : `
+        <button class="btn mb" onclick="bulkImport.step='spotcheck';renderBulkImportScreen()" style="width:100%">Continue to Spot Check (10 words)</button>
+      `}
+      <button class="btn btn-ghost btn-sm" onclick="bulkImport=null;renderBulkImportScreen()" style="width:100%">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function renderBulkSpotCheck(root){
+  if(!bulkImport.spotCheckPicked){
+    // Pick 10 random mastered candidates
+    const pool = bulkImport.plan.mastered.slice().sort(()=>Math.random()-0.5);
+    bulkImport.spotCheckPicked = pool.slice(0, Math.min(10, pool.length));
+  }
+  const idx = bulkImport.spotCheckIdx;
+  if(idx >= bulkImport.spotCheckPicked.length){
+    // Compute pass/fail
+    const wrong = bulkImport.spotCheckResults.filter(r => !r).length;
+    bulkImport.downgrade = wrong >= 3; // ≥3 wrong → downgrade mastered to familiar
+    bulkImport.step = 'done';
+    renderBulkImportScreen();
+    return;
+  }
+  const w = bulkImport.spotCheckPicked[idx];
+  root.innerHTML = `<div class="modal-overlay">
+    <div class="modal" style="max-width:480px">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">SPOT CHECK · ${idx+1}/${bulkImport.spotCheckPicked.length} · ${bulkImport.spotCheckResults.filter(r=>!r).length} wrong so far</div>
+      <h3 style="margin:0 0 4px">Do you actually know this word?</h3>
+      <p style="font-size:12px;color:var(--text3);margin:0 0 16px">If you can use it in a sentence and explain its meaning, click "Yes". If not, click "No".</p>
+
+      <div style="text-align:center;padding:32px 16px;background:linear-gradient(135deg,var(--bg2),var(--bg));border-radius:12px;margin-bottom:16px">
+        <div style="font-size:32px;font-weight:800;color:var(--text)">${w.w}</div>
+        ${w.p?'<div style="font-size:13px;color:var(--text3);margin-top:4px">'+w.p+'</div>':''}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <button class="btn" style="background:linear-gradient(135deg,var(--green),#00d2a0)" onclick="answerSpotCheck(true)">&#9989; Yes, I know it</button>
+        <button class="btn" style="background:linear-gradient(135deg,#636e72,#2d3436)" onclick="answerSpotCheck(false)">&#10060; No, I don't</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="bulkImport=null;renderBulkImportScreen()" style="width:100%">Cancel Import</button>
+    </div>
+  </div>`;
+}
+
+function answerSpotCheck(correct){
+  bulkImport.spotCheckResults.push(correct);
+  bulkImport.spotCheckIdx++;
+  renderBulkImportScreen();
+}
+
+function renderBulkDone(root){
+  const p = bulkImport.plan;
+  const downgrade = bulkImport.downgrade;
+  const wrong = bulkImport.spotCheckResults.filter(r => !r).length;
+  const right = bulkImport.spotCheckResults.filter(r => r).length;
+  root.innerHTML = `<div class="modal-overlay">
+    <div class="modal" style="max-width:480px">
+      <h3 style="margin:0 0 8px">Spot Check Result</h3>
+
+      <div style="background:${downgrade?'rgba(214,48,49,.08)':'rgba(0,184,148,.06)'};border:1px solid ${downgrade?'var(--red)':'var(--green)'};border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-weight:700;color:${downgrade?'var(--red)':'var(--green)'};margin-bottom:4px">
+          ${downgrade ? '⚠ Scaling Back' : '✓ Looks Good'}
+        </div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.5">
+          You got <b>${right}/${right+wrong}</b> right.
+          ${downgrade
+            ? ` That's below the 70% threshold. I'll downgrade all <b>${p.mastered.length}</b> "Mastered" candidates to <b>Familiar</b> instead — they'll show up in reviews to confirm.`
+            : ` That's above the 70% threshold. I'll proceed with the original plan.`}
+        </div>
+      </div>
+
+      <button class="btn mb" onclick="executeBulkImport()" style="width:100%">Commit to Library</button>
+      <button class="btn btn-ghost btn-sm" onclick="bulkImport=null;renderBulkImportScreen()" style="width:100%">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function executeBulkImport(){
+  if(!bulkImport) return;
+  const p = bulkImport.plan;
+  const downgrade = bulkImport.downgrade;
+  const now = Date.now();
+  if(!state.customWords) state.customWords = [];
+  const existingLower = new Set([
+    ...((state.customWords||[]).map(w => w.word.toLowerCase())),
+    ...((WORDS_RAW||[]).map(w => w[0].toLowerCase()))
+  ]);
+  let added = 0;
+  const counts = {mastered:0, familiar:0, learning:0, beginner:0, new:0};
+
+  function addBatch(entries, baseStatus){
+    const effectiveStatus = (baseStatus === 'mastered' && downgrade) ? 'familiar' : baseStatus;
+    entries.forEach(entry => {
+      const key = entry.w.toLowerCase();
+      if(existingLower.has(key)) return;
+      const diff = entry.b === '1K' ? 1 : entry.b === '2-3K' ? 2 : entry.b === '4-6K' ? 3 : entry.b === '7-10K' ? 4 : 5;
+      state.customWords.push({
+        word: entry.w,
+        definition: entry.d || '',
+        example: entry.e || '',
+        category: 'vmap-' + (entry.dom || 'general'),
+        difficulty: diff,
+        phonetic: entry.p || '',
+        grammar: null,
+        vmapBand: entry.b,
+        vmapDomain: entry.dom,
+        vmapInferred: true,
+        vmapImportedAt: now
+      });
+      existingLower.add(key);
+      added++;
+      counts[effectiveStatus]++;
+    });
+  }
+  addBatch(p.mastered, 'mastered');
+  addBatch(p.familiar, 'familiar');
+  addBatch(p.learning, 'learning');
+  addBatch(p.beginner, 'beginner');
+  addBatch(p['new'], 'new');
+  rebuildWords();
+
+  // Now set wordProgress
+  const allEntries = [
+    ...p.mastered.map(e => ({entry:e, status:downgrade?'familiar':'mastered'})),
+    ...p.familiar.map(e => ({entry:e, status:'familiar'})),
+    ...p.learning.map(e => ({entry:e, status:'learning'})),
+    ...p.beginner.map(e => ({entry:e, status:'beginner'})),
+    // 'new' entries get no wordProgress
+  ];
+  allEntries.forEach(({entry, status}) => {
+    const wObj = (WORDS||[]).find(w => w.word.toLowerCase() === entry.w.toLowerCase());
+    if(!wObj) return;
+    const prog = statusToProgress(status, now);
+    if(prog){
+      state.wordProgress[wObj.id] = {...prog, vmapImported:now};
+    }
+  });
+  saveState();
+
+  toast(`Added ${added} words: ${counts.mastered} mastered, ${counts.familiar} familiar, ${counts.learning} learning, ${counts.beginner} beginner, ${counts.new} new`);
+  bulkImport = null;
+  renderBulkImportScreen();
+  goTo('words');
+}
 
 // ===== INIT =====
 window.addEventListener('DOMContentLoaded', () => {
