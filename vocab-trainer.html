@@ -279,6 +279,15 @@ textarea.form-input{min-height:60px;resize:vertical}
 .chat-new-word-item .word-name{font-size:14px;font-weight:600}
 .chat-new-word-item .word-meaning{font-size:12px;color:var(--text2);margin-top:2px}
 .chat-add-word-btn{padding:6px 12px;border-radius:8px;background:var(--accent);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0}
+/* S1: Vocab flagging chip strip below AI bubbles */
+.chat-flag-strip{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;max-width:85%}
+.chat-flag-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 4px 4px 10px;border-radius:14px;background:rgba(108,92,231,.12);color:var(--accent2);font-weight:600}
+.chat-flag-add{background:var(--accent);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:13px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;font-weight:700}
+.chat-flag-add:active{transform:scale(.9)}
+/* S3: SRS due-word highlight inside AI replies */
+.srs-highlight{border-bottom:2px dashed var(--accent2);color:var(--accent2);font-weight:600;cursor:help}
+/* S3: chat header badge for review words */
+.chat-srs-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(108,92,231,.12);color:var(--accent2);font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;cursor:help}
 .chat-add-word-btn:disabled{opacity:.4;pointer-events:none}
 .chat-add-word-btn.added{background:var(--green)}
 
@@ -318,6 +327,7 @@ textarea.form-input{min-height:60px;resize:vertical}
   <div class="screen" id="screen-vtest"></div>
   <div class="screen" id="screen-words"></div>
   <div class="screen" id="screen-stats"></div>
+  <div class="screen" id="screen-errors"></div>
   <div class="screen" id="screen-settings"></div>
   <nav class="nav"><div class="nav-inner">
     <button class="nav-btn active" onclick="goTo('home')"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>Home</span></button>
@@ -435,6 +445,10 @@ if(!state.settings.targetLevel) state.settings.targetLevel = 'B2';
 if(!state.settings.layout) state.settings.layout = 'mobile';
 if(!state.listeningHistory) state.listeningHistory = [];
 if(!state.settings.storyMaxHistory) state.settings.storyMaxHistory = 200;
+if(!state.userProfile) state.userProfile = { jobContext:'', interests:[], recentTopics:[] };
+if(!Array.isArray(state.userProfile.interests)) state.userProfile.interests = [];
+if(!Array.isArray(state.userProfile.recentTopics)) state.userProfile.recentTopics = [];
+if(!Array.isArray(state.errorLog)) state.errorLog = [];
 
 function getGeminiModel(){ return state.settings.geminiModel || 'gemini-2.0-flash'; }
 function getGeminiUrl(key){ return `https://generativelanguage.googleapis.com/v1beta/models/${getGeminiModel()}:generateContent?key=${encodeURIComponent(key)}`; }
@@ -1191,6 +1205,7 @@ function renderScreen(screen){
     case 'ear': renderEarTraining(el); break;
     case 'story': renderStoryScreen(el); break;
     case 'vtest': renderVocabTest(el); break;
+    case 'errors': renderErrors(el); break;
     case 'settings': renderSettings(el); break;
   }
 }
@@ -1383,6 +1398,47 @@ function renderStoryPlayer(el){
   const s = storyState.current;
   const fmt = STORY_FORMATS[s.format] || {label:s.format, icon:''};
   const showText = !!storyState.revealed;
+
+  // Build colored target-word list using audit data
+  const audit = s.audit;
+  const fitsSet = new Set(audit && audit.fits ? audit.fits.map(x=>x.toLowerCase()) : []);
+  const forcedSet = new Set(audit && audit.forced ? audit.forced.map(x=>x.toLowerCase()) : []);
+  const skippedSet = new Set(audit && audit.skipped ? audit.skipped.map(x=>x.toLowerCase()) : []);
+  const wordsHtml = (s.words||[]).map(w => {
+    const wl = w.toLowerCase();
+    let color = 'var(--text)';
+    if(fitsSet.has(wl)) color = 'var(--green)';
+    else if(skippedSet.has(wl)) color = 'var(--text3)';
+    else if(forcedSet.has(wl)) color = 'var(--orange)';
+    return `<span style="color:${color}">${escapeStoryHtml(w)}</span>`;
+  }).join(' · ');
+
+  // Audit summary strip
+  let auditStrip = '';
+  if(audit){
+    const total = (s.words||[]).length;
+    const fits = audit.fits ? audit.fits.length : 0;
+    const skipped = audit.skipped ? audit.skipped.length : 0;
+    const forced = audit.forced ? audit.forced.length : 0;
+    auditStrip = `<div style="font-size:11px;color:var(--text3);margin-bottom:8px;background:rgba(255,255,255,0.04);padding:6px 10px;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>🎯 ${total}</span>
+      <span style="color:var(--green)">✓ fit ${fits}</span>
+      ${skipped > 0 ? `<span style="color:var(--text3)">⏭ skipped ${skipped}</span>` : ''}
+      ${forced > 0 ? `<span style="color:var(--orange)">⚠ forced ${forced}</span>` : ''}
+    </div>`;
+  }
+
+  // Difficulty strip
+  let diffStrip = '';
+  if(s.difficulty && typeof s.difficulty.unknownRatio === 'number'){
+    const pct = Math.round(s.difficulty.unknownRatio * 100);
+    const isHigh = pct > 12;
+    const color = isHigh ? 'var(--orange)' : 'var(--text3)';
+    diffStrip = `<div style="font-size:11px;color:${color};margin-bottom:8px;display:flex;align-items:center;gap:6px">
+      <span>📊 unknown vocab: ${pct}% ${isHigh ? '(harder than ideal i+1)' : '(comfortable)'}</span>
+    </div>`;
+  }
+
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <button class="btn btn-ghost btn-sm" onclick="backToStoryPicker()">&larr; Back</button>
@@ -1395,10 +1451,13 @@ function renderStoryPlayer(el){
         <p class="subtitle">${escapeStoryHtml((s.words||[]).join(', '))}</p>
       </div>` : `
       <div class="card mb" style="padding:16px">
+        ${auditStrip}
+        ${diffStrip}
         <div style="font-size:11px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Words</div>
-        <div style="font-size:13px;font-weight:600;margin-bottom:14px">${escapeStoryHtml((s.words||[]).join(' · '))}</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:14px">${wordsHtml}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" onclick="playStory()" style="flex:1;min-width:120px;background:linear-gradient(135deg,var(--green),#00d2a0);color:white">&#9654; Play</button>
+          <button class="btn" onclick="copyStoryForLangua()" style="flex:1;min-width:140px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:white">&#128203; Copy for Langua</button>
+          <button class="btn btn-ghost btn-sm" onclick="playStory()">&#9654; Play</button>
           <button class="btn btn-ghost btn-sm" onclick="stopStoryPlayback()">&#9632; Stop</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleStoryText()">${showText?'Hide':'Show'} text</button>
         </div>
@@ -1409,6 +1468,44 @@ function renderStoryPlayer(el){
         <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteCurrentStory()">&times; Delete</button>
       </div>
     `}`;
+}
+
+async function copyStoryForLangua(){
+  if(!storyState || !storyState.current || !storyState.current.passage){
+    toast('Nothing to copy yet'); return;
+  }
+  const text = storyState.current.passage;
+  const targetCount = (storyState.current.words || []).length;
+  const audit = storyState.current.audit;
+  const naturalCount = audit && audit.fits ? audit.fits.length : targetCount;
+
+  let copied = false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    }
+  }catch(e){ /* fall through to legacy */ }
+
+  if(!copied){
+    // Legacy fallback for older browsers / non-https contexts
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed'; ta.style.left = '-9999px'; ta.style.top = '0';
+    ta.setAttribute('readonly','');
+    document.body.appendChild(ta);
+    ta.select();
+    try{ copied = document.execCommand('copy'); }catch(e){ copied = false; }
+    document.body.removeChild(ta);
+  }
+
+  if(copied){
+    toast(`Copied ✓ ${naturalCount}/${targetCount} target words ready for Langua`);
+  } else {
+    toast('Copy blocked — show text and select manually');
+    // Force show text so user can manually select
+    if(!storyState.revealed){ storyState.revealed = true; renderScreen('story'); }
+  }
 }
 
 function backToStoryPicker(){
@@ -1423,6 +1520,146 @@ function toggleStoryText(){
   renderScreen('story');
 }
 
+// ===== S2: STORY MODE 2-AGENT (Writer + Auditor) =====
+
+// AI-cliche blacklist appended to story prompts
+const AI_CLICHE_RULES = `Hard rules — DO NOT write any of these AI-sounding patterns:
+- "It truly taught me a valuable lesson"
+- "In conclusion" / "All in all"
+- "Little did I know"
+- "I realized that..."
+- "At the end of the day"
+- "That said" / "That being said"
+- Generic moral wrap-up sentences
+- Forced platitudes about life / growth / lessons
+Write like a real person would talk — specific details, no neat moral.`;
+
+// Returns ratio of "unknown" content words in a passage relative to user's library.
+// Unknown = not in library at all, OR in library with status 'beginner'/'new'.
+function analyzePassageDifficulty(passage){
+  if(!passage) return { unknownRatio: 0, totalContent: 0, unknownWords: [] };
+  // Strip [Interviewer:] [Candidate:] labels and punctuation, keep word tokens
+  const tokens = passage
+    .replace(/\b(Interviewer|Candidate)\s*:/gi, ' ')
+    .toLowerCase()
+    .match(/\b[a-z]{4,}\b/g) || [];
+
+  // Build a known-words set: any word in WORDS whose status is 'familiar' or 'mastered' is "known"
+  const knownSet = new Set();
+  (WORDS||[]).forEach(w => {
+    const status = getWordStatus(w.id);
+    if(status === 'mastered' || status === 'familiar' || status === 'learning'){
+      knownSet.add((w.word||'').toLowerCase());
+    }
+  });
+
+  // Treat extremely common stopwords as known regardless (the analyzer is about content vocab)
+  const commonWords = new Set(['that','this','with','from','they','have','were','been','their','there','about','would','could','should','what','when','where','will','your','some','more','than','then','only','even','also','just','like','very','much','many','into','over','through','because','while','being','these','those','which','still','well','back','after','before','first','last','every','both','same','here','make','made','take','took','went','come','came','find','found','give','gave','know','knew','want','wanted','need','needed','feel','felt','look','looked','call','called','seem','seemed','tell','told','think','thought','keep','kept','said','says','goes','time','year','years','days','weeks','people','person','thing','things','work','life','home','house','place','world','part','parts','area','side','room','team','story','question','answer','example','case','point','word','words','name','company','school','today','tomorrow','yesterday','morning','night','week','month','minute','hour']);
+  let unknown = 0;
+  let counted = 0;
+  const unknownList = new Set();
+  tokens.forEach(t => {
+    if(commonWords.has(t)) return;
+    counted++;
+    if(!knownSet.has(t)) {
+      unknown++;
+      if(unknownList.size < 12) unknownList.add(t);
+    }
+  });
+  if(counted === 0) return { unknownRatio: 0, totalContent: 0, unknownWords: [] };
+  return { unknownRatio: unknown / counted, totalContent: counted, unknownWords: Array.from(unknownList) };
+}
+
+// Auditor agent — checks each target word's usage in the passage and labels fits / forced / skipped.
+async function storyAuditorAgent(passage, targetWords){
+  if(!state.settings.apiKey) return null;
+  if(!passage || !targetWords || !targetWords.length) return null;
+  const wordList = JSON.stringify(targetWords);
+
+  const prompt = `You are a strict English usage auditor for ESL audio content.
+
+Passage:
+"""
+${passage}
+"""
+
+Target vocabulary words: ${wordList}
+
+For EACH target word, decide one of three labels:
+- "fits": the word appears in the passage AND its usage feels natural/idiomatic for the context.
+- "forced": the word appears but its usage feels awkward, shoehorned, or unnatural — like the writer was forced to include it.
+- "skipped": the word does NOT appear in the passage at all.
+
+A morphological variant counts as the base word (e.g. "deployed" counts as "deploy", "manages" as "manage").
+
+Return ONLY valid JSON:
+{ "fits": ["..."], "forced": ["..."], "skipped": ["..."] }
+
+Every input word must appear in EXACTLY ONE of the three arrays.`;
+
+  try{
+    const reply = await callGemini([{role:'user', text:prompt}], 'You are a JSON-only vocabulary auditor. Output valid JSON only — no prose, no fences.', { responseMimeType: 'application/json' });
+    if(!reply) return null;
+    const cleaned = cleanGeminiText(reply);
+    const data = JSON.parse(cleaned);
+    if(!data || !Array.isArray(data.fits) || !Array.isArray(data.forced) || !Array.isArray(data.skipped)) return null;
+    return {
+      fits: data.fits.filter(w => typeof w === 'string'),
+      forced: data.forced.filter(w => typeof w === 'string'),
+      skipped: data.skipped.filter(w => typeof w === 'string')
+    };
+  }catch(e){
+    console.warn('Story auditor failed:', e);
+    return null;
+  }
+}
+
+function buildStoryPrompt(format, targetWords, vibe, simplifyHint, avoidForcedHint){
+  const wordList = targetWords.join(', ');
+  const simplify = simplifyHint ? `\n- The previous draft was too hard for the learner — use SIMPLER everyday vocabulary outside the target words. Aim for B1 baseline.` : '';
+  const avoid = (avoidForcedHint && avoidForcedHint.length) ? `\n- The previous draft made these words feel forced — REWORK or omit them: ${avoidForcedHint.join(', ')}.` : '';
+
+  if(format === 'podcast'){
+    return `Write a first-person podcast-style monologue of roughly ${STORY_TARGET_WORDS} words for an intermediate ESL learner.
+
+Vibe: ${vibe}.
+Try to weave these vocabulary words into the passage where natural: ${wordList}.
+
+Rules:
+- IMPORTANT: You do NOT have to use every target word. If a word does not fit the topic naturally, SKIP IT. A skipped word is far better than a forced one.
+- First-person voice, conversational but thoughtful.
+- Specific, vivid details (no generic "daily life" cliches).
+- One coherent topic or story thread.
+- No title, no intro like "Hello welcome" — just start speaking.
+- Plain prose only: no asterisks, no headers, no bullet points, no markdown.
+- Under ${STORY_TARGET_WORDS + 60} words total.${simplify}${avoid}
+
+${AI_CLICHE_RULES}
+
+Output: only the monologue text itself. Nothing else.`;
+  } else {
+    return `Write an interview-prep audio passage of roughly ${STORY_TARGET_WORDS} words for an ESL professional preparing for job interviews.
+
+Scenario type: ${vibe}.
+Structure:
+- Line 1: "Interviewer:" followed by a natural question (2-3 sentences).
+- Line 2+: "Candidate:" followed by a strong model answer showing how a thoughtful candidate would respond.
+
+Try to weave these vocabulary words into the candidate's answer where natural: ${wordList}.
+
+Rules:
+- IMPORTANT: You do NOT have to use every target word. If a word does not fit the scenario naturally, SKIP IT.
+- Concrete scenario details, not vague platitudes.
+- Intermediate-to-upper English level.
+- Under ${STORY_TARGET_WORDS + 80} words total.
+- No stage directions, no markdown, no asterisks.${simplify}${avoid}
+
+${AI_CLICHE_RULES}
+
+Output: only the dialogue itself. Nothing else.`;
+  }
+}
+
 async function generateStory(formatOrRandom){
   if(!state.settings.apiKey){ toast('Add Gemini API key first'); return; }
   const format = formatOrRandom === 'random'
@@ -1430,11 +1667,11 @@ async function generateStory(formatOrRandom){
     : formatOrRandom;
   const fmtDef = STORY_FORMATS[format];
   if(!fmtDef){ toast('Unknown format'); return; }
-  const words = pickNonMasteredWords(STORY_WORD_COUNT);
-  if(words.length < 2){ toast('Add some words first'); return; }
+  const wordsObj = pickNonMasteredWords(STORY_WORD_COUNT);
+  if(wordsObj.length < 2){ toast('Add some words first'); return; }
   const vibe = fmtDef.vibes[Math.floor(Math.random() * fmtDef.vibes.length)];
-  const wordList = words.map(w=>w.word).join(', ');
   const id = 'st_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  let targetWords = wordsObj.map(w => w.word);
 
   stopStoryPlayback();
   storyState = {
@@ -1442,68 +1679,87 @@ async function generateStory(formatOrRandom){
     generating:true,
     genStatus:'Writing passage...',
     revealed:false,
-    current:{ id, format, words: words.map(w=>w.word), passage:'', vibe, createdAt:Date.now(), plays:0, audioKey:null }
+    current:{ id, format, words: targetWords.slice(), passage:'', vibe, createdAt:Date.now(), plays:0, audioKey:null, audit:null, difficulty:null }
   };
   goTo('story');
 
-  let prompt;
-  if(format === 'podcast'){
-    prompt = `Write a first-person podcast-style monologue of roughly ${STORY_TARGET_WORDS} words for an intermediate ESL learner.
-
-Vibe: ${vibe}.
-Weave these vocabulary words naturally into the passage (use each at least once, in a context that makes the meaning clear): ${wordList}.
-
-Style:
-- First-person voice, conversational but thoughtful
-- Specific, vivid details (avoid generic "daily life" cliches)
-- One coherent topic or story thread
-- No title, no intro like "Hello welcome" — just start speaking
-- Plain prose only: no asterisks, no headers, no bullet points, no markdown
-- Under ${STORY_TARGET_WORDS + 60} words total
-
-Output: only the monologue text itself. Nothing else.`;
-  } else {
-    prompt = `Write an interview-prep audio passage of roughly ${STORY_TARGET_WORDS} words for an ESL professional preparing for job interviews.
-
-Scenario type: ${vibe}.
-Structure:
-- Line 1: "Interviewer:" followed by a natural question (2-3 sentences).
-- Line 2+: "Candidate:" followed by a strong model answer showing how a thoughtful candidate would respond.
-
-Weave these vocabulary words naturally into the candidate's answer: ${wordList}.
-
-Style:
-- Concrete scenario details, not vague platitudes
-- Intermediate-to-upper English level
-- Under ${STORY_TARGET_WORDS + 80} words total
-- No stage directions, no markdown, no asterisks
-
-Output: only the dialogue itself. Nothing else.`;
-  }
-
   const sys = 'You are a writer generating natural, engaging audio content for ESL learners. Write plain continuous prose only — no markdown, no headers, no asterisks, no code fences.';
-  let passage;
-  try{
-    passage = await callGemini([{role:'user', text:prompt}], sys);
-  }catch(e){
-    storyState.generating = false;
-    toast('Generation failed');
+  let passage = null;
+  let audit = null;
+  let difficulty = null;
+  let avoidForced = [];
+  let simplify = false;
+  const MAX_ATTEMPTS = 2;
+  const FORCED_RATIO_LIMIT = 0.30;
+  const UNKNOWN_RATIO_LIMIT = 0.12;
+
+  for(let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++){
+    storyState.genStatus = attempt === 1 ? 'Writing passage...' : 'Rewriting more naturally...';
     renderScreen('story');
-    return;
+
+    const prompt = buildStoryPrompt(format, targetWords, vibe, simplify, avoidForced);
+    let draft;
+    try{
+      draft = await callGemini([{role:'user', text:prompt}], sys);
+    }catch(e){
+      console.warn('Story writer failed:', e);
+    }
+    if(!draft){
+      if(attempt === MAX_ATTEMPTS){
+        storyState.generating = false;
+        toast('Generation failed');
+        renderScreen('story');
+        return;
+      }
+      continue;
+    }
+    draft = cleanGeminiText(draft).trim().replace(/\*\*/g,'').replace(/^\*+\s*/gm,'');
+
+    storyState.genStatus = 'Auditing vocabulary...';
+    renderScreen('story');
+
+    const auditRes = await storyAuditorAgent(draft, targetWords);
+    const diff = analyzePassageDifficulty(draft);
+
+    // Always keep the latest as our best candidate so far
+    passage = draft;
+    audit = auditRes;
+    difficulty = diff;
+
+    // Decide whether to retry
+    const totalAttempted = auditRes ? (auditRes.fits.length + auditRes.forced.length) : targetWords.length;
+    const forcedCount = auditRes ? auditRes.forced.length : 0;
+    const forcedRatio = totalAttempted > 0 ? forcedCount / totalAttempted : 0;
+    const tooHard = diff.unknownRatio > UNKNOWN_RATIO_LIMIT;
+    const tooForced = forcedRatio > FORCED_RATIO_LIMIT;
+
+    if(attempt < MAX_ATTEMPTS && (tooHard || tooForced)){
+      if(tooForced && auditRes){
+        avoidForced = auditRes.forced.slice();
+      }
+      if(tooHard) simplify = true;
+      console.log(`Story retry: forcedRatio=${forcedRatio.toFixed(2)}, unknownRatio=${diff.unknownRatio.toFixed(2)}`);
+      continue;
+    }
+    break;
   }
+
   if(!passage){
     storyState.generating = false;
     toast('AI returned empty response');
     renderScreen('story');
     return;
   }
-  passage = cleanGeminiText(passage).trim().replace(/\*\*/g,'').replace(/^\*+\s*/gm,'');
+
   storyState.current.passage = passage;
+  storyState.current.audit = audit;
+  storyState.current.difficulty = difficulty;
 
   state.listeningHistory = state.listeningHistory || [];
   state.listeningHistory.push({
     id, format, passage,
     words: storyState.current.words,
+    audit, difficulty,
     vibe, audioKey:null,
     createdAt: Date.now(), lastPlayed:null, plays:0
   });
@@ -1642,7 +1898,8 @@ function openStoryFromHistory(id){
     current:{
       id: entry.id, format: entry.format, words: entry.words||[],
       passage: entry.passage, vibe: entry.vibe,
-      createdAt: entry.createdAt, plays: entry.plays||0, audioKey: entry.audioKey
+      createdAt: entry.createdAt, plays: entry.plays||0, audioKey: entry.audioKey,
+      audit: entry.audit || null, difficulty: entry.difficulty || null
     }
   };
   renderScreen('story');
@@ -1756,7 +2013,22 @@ function renderHome(el){
         <span style="font-size:12px;color:var(--text3)">${WORDS.length} words</span>
       </div>
       ${due > 0 ? '<span style="font-size:12px;color:var(--accent2);font-weight:600">' + due + ' due</span>' : '<span style="font-size:12px;color:var(--text3)">&#8250;</span>'}
-    </div>`;
+    </div>
+
+    ${(() => {
+      const stats = getErrorStats();
+      if(stats.totalActive === 0 && stats.totalResolved === 0) return '';
+      const top = stats.ranked.find(r => r.count > 0);
+      const topLabel = top ? (GRAMMAR_CATEGORIES[top.cat]?.label || top.cat) : '';
+      return `<div onclick="goTo('errors')" class="card card-sm mt" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:10px 16px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:16px">📝</span>
+          <span style="font-size:13px;font-weight:600">Grammar Tracker</span>
+          ${stats.recentCount > 0 ? `<span style="font-size:11px;color:var(--text3)">${stats.recentCount} this week${top ? ' · top: ' + topLabel : ''}</span>` : `<span style="font-size:11px;color:var(--text3)">${stats.totalActive} active</span>`}
+        </div>
+        ${stats.totalActive > 0 ? `<span style="font-size:12px;color:var(--orange);font-weight:600">${stats.totalActive}</span>` : '<span style="font-size:12px;color:var(--text3)">&#8250;</span>'}
+      </div>`;
+    })()}`;
 }
 
 // ===== QUIZ =====
@@ -3176,6 +3448,125 @@ function showUsageGuide(){
     </div>
   </div>`;
   root.style.display = 'flex';
+}
+
+// ===== S4: ERRORS SCREEN =====
+let errorsState = { expanded: new Set(), filter: 'active' /* active | all | resolved */ };
+
+function toggleErrorCategory(cat){
+  if(errorsState.expanded.has(cat)) errorsState.expanded.delete(cat);
+  else errorsState.expanded.add(cat);
+  renderErrors(document.getElementById('screen-errors'));
+}
+function setErrorsFilter(f){ errorsState.filter = f; renderErrors(document.getElementById('screen-errors')); }
+
+function escapeErr(s){
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatRelTime(ts){
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60000);
+  if(m < 1) return 'just now';
+  if(m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  if(h < 24) return h + 'h ago';
+  const d = Math.floor(h / 24);
+  if(d < 7) return d + 'd ago';
+  return new Date(ts).toISOString().slice(0,10);
+}
+
+function renderErrors(el){
+  if(!el) return;
+  const stats = getErrorStats();
+  const log = state.errorLog || [];
+  const filterFn = errorsState.filter === 'all'
+    ? (e => true)
+    : errorsState.filter === 'resolved'
+      ? (e => e.resolved)
+      : (e => !e.resolved);
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <button class="btn btn-ghost btn-sm" onclick="goTo('home')">&larr; Home</button>
+      <h2 style="margin:0;font-size:18px">Grammar Tracker</h2>
+      <div style="width:60px"></div>
+    </div>
+
+    <div class="card card-sm mb" style="display:flex;gap:14px;justify-content:space-around;text-align:center;padding:14px">
+      <div>
+        <div style="font-size:22px;font-weight:800;color:var(--accent2)">${stats.totalActive}</div>
+        <div style="font-size:11px;color:var(--text3)">Active</div>
+      </div>
+      <div>
+        <div style="font-size:22px;font-weight:800;color:var(--orange)">${stats.recentCount}</div>
+        <div style="font-size:11px;color:var(--text3)">This week</div>
+      </div>
+      <div>
+        <div style="font-size:22px;font-weight:800;color:var(--green)">${stats.totalResolved}</div>
+        <div style="font-size:11px;color:var(--text3)">Resolved</div>
+      </div>
+    </div>
+
+    ${log.length === 0 ? `
+      <div class="card mb" style="text-align:center;padding:32px 16px">
+        <div style="font-size:36px;margin-bottom:8px">📝</div>
+        <h3>No errors logged yet</h3>
+        <p style="font-size:13px;color:var(--text2);margin-top:6px;line-height:1.5">
+          Open <b>Free Chat</b> and the tutor will spot grammar errors. Each one gets categorized and tracked here so you can see your weak spots.
+        </p>
+        <button class="btn mt" onclick="startFreeChat()" style="width:auto;padding:10px 24px">&#128172; Start Free Chat</button>
+      </div>
+    ` : `
+      <div style="display:flex;gap:6px;margin-bottom:12px">
+        <button class="btn btn-sm ${errorsState.filter==='active'?'':'btn-ghost'}" style="flex:1" onclick="setErrorsFilter('active')">Active (${stats.totalActive})</button>
+        <button class="btn btn-sm ${errorsState.filter==='resolved'?'':'btn-ghost'}" style="flex:1" onclick="setErrorsFilter('resolved')">Resolved (${stats.totalResolved})</button>
+        <button class="btn btn-sm ${errorsState.filter==='all'?'':'btn-ghost'}" style="flex:1" onclick="setErrorsFilter('all')">All</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${stats.ranked.filter(g => {
+          const items = log.filter(e => Array.isArray(e.categories) && e.categories.includes(g.cat) && filterFn(e));
+          return items.length > 0;
+        }).map(g => {
+          const info = GRAMMAR_CATEGORIES[g.cat];
+          const items = log.filter(e => Array.isArray(e.categories) && e.categories.includes(g.cat) && filterFn(e))
+                           .sort((a,b) => b.ts - a.ts);
+          const expanded = errorsState.expanded.has(g.cat);
+          return `<div class="card card-sm" style="padding:0;overflow:hidden;border-left:3px solid ${info.color}">
+            <div style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleErrorCategory('${g.cat}')">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:18px">${info.icon}</span>
+                <div>
+                  <div style="font-weight:700;font-size:14px">${info.label}</div>
+                  <div style="font-size:11px;color:var(--text3)">${info.zh} · ${items.length} ${items.length===1?'error':'errors'}</div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px">
+                ${errorsState.filter === 'active' && items.length > 0 ? `<button class="btn btn-sm btn-ghost" style="width:auto;font-size:11px;padding:4px 10px" onclick="event.stopPropagation();markCategoryResolved('${g.cat}')">Mark all resolved</button>` : ''}
+                <span style="color:var(--text3);font-size:14px">${expanded?'▾':'▸'}</span>
+              </div>
+            </div>
+            ${expanded ? `<div style="padding:0 14px 12px;display:flex;flex-direction:column;gap:8px">
+              ${items.slice(0, 30).map(e => `<div style="background:var(--bg3);padding:10px 12px;border-radius:8px;font-size:13px;${e.resolved?'opacity:.55':''}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
+                  <div style="font-size:11px;color:var(--text3)">${formatRelTime(e.ts)} · ${escapeErr(e.source||'chat')}</div>
+                  ${!e.resolved ? `<button style="background:none;border:none;color:var(--green);font-size:11px;cursor:pointer;padding:0" onclick="markErrorResolved('${e.id}')" title="Mark resolved">✓ resolve</button>` : `<span style="color:var(--green);font-size:11px">✓ resolved</span>`}
+                </div>
+                <div style="margin-bottom:4px"><span style="color:var(--red);text-decoration:line-through">${escapeErr(e.userPart)}</span> &rarr; <span style="color:var(--green);font-weight:600">${escapeErr(e.correctedPart)}</span></div>
+                ${e.pattern ? `<div style="font-size:11px;color:var(--text2);margin-bottom:2px"><i>${escapeErr(e.pattern)}</i></div>` : ''}
+                ${e.tipZh ? `<div style="font-size:11px;color:var(--text2)">💡 ${escapeErr(e.tipZh)}</div>` : ''}
+                <div style="font-size:10px;color:var(--text3);margin-top:6px;font-style:italic">in: "${escapeErr(e.userText.slice(0, 100))}${e.userText.length>100?'…':''}"</div>
+              </div>`).join('')}
+              ${items.length > 30 ? `<div style="text-align:center;font-size:11px;color:var(--text3);padding:6px">...and ${items.length - 30} older</div>` : ''}
+            </div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+
+      ${stats.totalResolved > 0 ? `<button class="btn btn-ghost btn-sm mt" style="color:var(--red);font-size:12px" onclick="clearResolvedErrors()">Delete all resolved errors</button>` : ''}
+    `}
+  `;
 }
 
 // ===== SETTINGS =====
@@ -5776,7 +6167,386 @@ function deleteWordById(wordId){
 }
 
 // ===== GEMINI API =====
-async function callGemini(messages, systemInstruction){
+// ===== S3: PROFILE / SRS INJECTION HELPERS =====
+function getUserProfile(){
+  const p = state.userProfile || (state.userProfile = { jobContext:'', interests:[], recentTopics:[] });
+  if(!Array.isArray(p.interests)) p.interests = [];
+  if(!Array.isArray(p.recentTopics)) p.recentTopics = [];
+  return p;
+}
+
+function getDueReviewWordsForChat(n){
+  n = n || 3;
+  const due = (typeof getDueWords === 'function') ? getDueWords() : [];
+  const pool = due.slice();
+  // Fall back to weak words if no due
+  if(pool.length < n){
+    const weak = (WORDS||[]).filter(w => {
+      const s = getWordStatus(w.id);
+      return s === 'beginner' || s === 'learning';
+    });
+    pool.push(...weak);
+  }
+  // Dedupe
+  const seen = new Set();
+  const out = [];
+  for(const w of pool){
+    if(!w || seen.has(w.id)) continue;
+    seen.add(w.id);
+    out.push(w);
+    if(out.length >= n) break;
+  }
+  return out;
+}
+
+// Builds the [Learner profile] + [Today's review words] block appended to chat system prompts.
+function buildChatContext(){
+  const profile = getUserProfile();
+  const cefr = (typeof getCEFRLevel === 'function') ? getCEFRLevel() : null;
+  const reviewWords = getDueReviewWordsForChat(3);
+
+  let block = '\n\n[Learner profile]';
+  if(cefr && cefr.label){
+    block += `\n- English level: ${cefr.label}`;
+  } else if(cefr && cefr.level){
+    block += `\n- English level: ${cefr.level}`;
+  }
+  if(profile.jobContext){
+    block += `\n- Job / industry: ${profile.jobContext}`;
+  }
+  if(profile.interests && profile.interests.length){
+    block += `\n- Interests: ${profile.interests.slice(0,5).join(', ')}`;
+  }
+  if(profile.recentTopics && profile.recentTopics.length){
+    block += `\n- Recent topics they've discussed: ${profile.recentTopics.slice(0,3).join('; ')}`;
+  }
+
+  if(reviewWords.length){
+    block += `\n\n[Today's review words]`;
+    block += `\nThese words are due for spaced-repetition review today. If — and only if — the conversation flows naturally toward one of them, weave 1-2 in. NEVER force them. Words: ${reviewWords.map(w=>w.word).join(', ')}.`;
+  }
+
+  return { promptBlock: block, reviewWords: reviewWords.map(w=>w.word) };
+}
+
+// Wraps an AI reply, wrapping any review-word occurrence in a highlight span.
+// Only highlights inside the main reply (before [Correction] section).
+function highlightReviewWordsHtml(text, role, reviewWords){
+  if(role !== 'ai' || !reviewWords || !reviewWords.length){
+    return (text || '').replace(/\n/g,'<br>');
+  }
+  const parts = (text || '').split('[Correction]');
+  let main = parts[0];
+  reviewWords.forEach(rw => {
+    if(!rw) return;
+    const esc = rw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b(${esc})\\b`, 'gi');
+    main = main.replace(re, '<span class="srs-highlight" title="今日复习词 (SRS due today)">$1</span>');
+  });
+  parts[0] = main;
+  return parts.join('[Correction]').replace(/\n/g,'<br>');
+}
+
+// ===== S3: PROFILE UPDATER (runs after endChat) =====
+async function updateProfileFromChat(messages){
+  if(!state.settings.apiKey) return;
+  if(!messages || messages.length < 4) return;
+  const userText = messages.filter(m=>m.role==='user').map(m=>m.text).join('\n');
+  if(userText.trim().length < 30) return;
+
+  const profile = getUserProfile();
+  const prompt = `You are a profile extractor. Below are messages a Chinese ESL learner sent during an English practice chat.
+
+Current known profile:
+- Job/industry: ${profile.jobContext || '(unknown)'}
+- Interests: ${profile.interests.join(', ') || '(none recorded)'}
+- Recent topics: ${profile.recentTopics.join('; ') || '(none recorded)'}
+
+Recent learner messages:
+"""
+${userText}
+"""
+
+Extract any NEW info from these messages (don't repeat what's already known). Return ONLY valid JSON in this exact shape:
+{
+  "jobContext": "<string — keep current value if no new info, or update if a clearer/more specific job context emerged>",
+  "newInterests": ["<array of newly mentioned hobbies/interests, lowercase short phrases, 0-4 items>"],
+  "topicTalkedAbout": "<short phrase summarizing the main topic of THIS chat, e.g. 'weekend hiking plans', or empty string if unclear>"
+}
+
+Rules:
+- Only add interests that the learner actually expressed enthusiasm for or repeatedly referenced.
+- Do NOT invent details. If nothing new, return empty arrays / unchanged jobContext.
+- jobContext examples: "environmental sector, looking for fieldwork roles in Canada", "warehouse / logistics", "student".`;
+
+  try{
+    const reply = await callGemini([{role:'user', text:prompt}], 'You are a JSON-only profile extractor. Reply with valid JSON only, no prose, no code fences.', { responseMimeType: 'application/json' });
+    if(!reply) return;
+    const cleaned = cleanGeminiText(reply);
+    const data = JSON.parse(cleaned);
+    let changed = false;
+    if(data.jobContext && typeof data.jobContext === 'string' && data.jobContext.trim() && data.jobContext !== profile.jobContext){
+      profile.jobContext = data.jobContext.trim().slice(0, 200);
+      changed = true;
+    }
+    if(Array.isArray(data.newInterests)){
+      const existing = new Set(profile.interests.map(s=>s.toLowerCase()));
+      data.newInterests.forEach(it => {
+        if(typeof it === 'string'){
+          const v = it.trim().toLowerCase().slice(0, 60);
+          if(v && !existing.has(v)){
+            profile.interests.push(v);
+            existing.add(v);
+            changed = true;
+          }
+        }
+      });
+      if(profile.interests.length > 20) profile.interests = profile.interests.slice(-20);
+    }
+    if(typeof data.topicTalkedAbout === 'string' && data.topicTalkedAbout.trim()){
+      const t = data.topicTalkedAbout.trim().slice(0, 80);
+      profile.recentTopics.unshift(t);
+      if(profile.recentTopics.length > 8) profile.recentTopics = profile.recentTopics.slice(0, 8);
+      changed = true;
+    }
+    if(changed) saveState();
+  }catch(e){
+    console.warn('Profile update failed:', e);
+  }
+}
+
+// ===== S1: VOCAB FLAGGING AGENT =====
+// Scans an AI chat reply, flags 1-3 useful words above the learner's current vocab,
+// excludes words already in their library and words already flagged this chat.
+async function flagVocabAgent(replyText, alreadyFlaggedSet){
+  if(!state.settings.apiKey) return [];
+  if(!replyText || replyText.length < 20) return [];
+  const main = replyText.split('[Correction]')[0]; // ignore correction section
+
+  // Pull a sample of user's known words (just the strings) to give the agent an exclusion list
+  const knownSample = (WORDS||[]).slice(0, 200).map(w => (w.word||'').toLowerCase()).filter(Boolean);
+  const knownSet = new Set(knownSample);
+  const alreadyFlagged = alreadyFlaggedSet ? Array.from(alreadyFlaggedSet) : [];
+
+  const cefr = (typeof getCEFRLevel === 'function') ? getCEFRLevel() : null;
+  const levelLabel = (cefr && (cefr.label || cefr.level)) || 'B1';
+
+  const prompt = `You are a vocabulary scout for an ESL learner at level ${levelLabel}.
+Read this short English passage and pick 1-3 words or short phrases that:
+- Are useful for an intermediate-to-upper-intermediate learner (B1–C1 range)
+- Likely SLIGHTLY ABOVE the learner's current vocabulary (NOT basic words like "go", "people", "think")
+- Are content words or fixed phrases (not articles, prepositions, simple verbs)
+- Actually appear in the passage (use the surface form from the passage)
+
+EXCLUDE:
+- Any word already in the learner's library: ${knownSample.slice(0, 80).join(', ')}${knownSample.length > 80 ? ', ...' : ''}
+- Already-flagged words in this chat: ${alreadyFlagged.join(', ') || '(none)'}
+- Proper nouns and names
+- Words shorter than 4 letters unless they are clearly idiomatic
+
+Passage:
+"""
+${main}
+"""
+
+Return ONLY valid JSON:
+{ "flagged": [ { "word": "<exact surface form>", "brief": "<3-8 word definition>" }, ... ] }
+
+If no good candidates, return { "flagged": [] }.`;
+
+  try{
+    const reply = await callGemini([{role:'user', text:prompt}], 'You are a JSON-only vocabulary scout. Output only valid JSON, no prose, no code fences.', { responseMimeType: 'application/json' });
+    if(!reply) return [];
+    const cleaned = cleanGeminiText(reply);
+    const data = JSON.parse(cleaned);
+    if(!data || !Array.isArray(data.flagged)) return [];
+    const out = [];
+    const seen = new Set();
+    for(const item of data.flagged){
+      if(!item || typeof item.word !== 'string') continue;
+      const w = item.word.trim();
+      const wl = w.toLowerCase();
+      if(!w || w.length < 3) continue;
+      if(knownSet.has(wl)) continue;
+      if(alreadyFlaggedSet && alreadyFlaggedSet.has(wl)) continue;
+      if(seen.has(wl)) continue;
+      // Verify it actually appears in the passage (case-insensitive)
+      if(!new RegExp(`\\b${wl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(main)) continue;
+      seen.add(wl);
+      out.push({ word: w, brief: (item.brief || '').toString().slice(0, 80) });
+      if(out.length >= 3) break;
+    }
+    return out;
+  }catch(e){
+    console.warn('Flag vocab agent failed:', e);
+    return [];
+  }
+}
+
+// ===== S4: GRAMMAR ERROR CLASSIFIER =====
+const GRAMMAR_CATEGORIES = {
+  tense:       { label:'Tense',                 zh:'时态',     icon:'⏰', color:'#fdcb6e' },
+  article:     { label:'Article',               zh:'冠词',     icon:'🅰️', color:'#74b9ff' },
+  preposition: { label:'Preposition',           zh:'介词',     icon:'↗️', color:'#a29bfe' },
+  agreement:   { label:'Subject-Verb Agreement',zh:'主谓一致', icon:'⚖️', color:'#fd79a8' },
+  wordchoice:  { label:'Word Choice',           zh:'词义选择', icon:'🎯', color:'#00b894' },
+  collocation: { label:'Collocation',           zh:'搭配',     icon:'🔗', color:'#e17055' },
+  wordorder:   { label:'Word Order',            zh:'语序',     icon:'📐', color:'#6c5ce7' },
+  plural:      { label:'Plural / Countability', zh:'单复数',   icon:'#️⃣', color:'#00cec9' }
+};
+const ERROR_LOG_MAX = 500;
+
+function parseCorrectionBlock(replyText){
+  if(!replyText) return null;
+  const idx = replyText.indexOf('[Correction]');
+  if(idx === -1) return null;
+  return replyText.slice(idx).trim();
+}
+
+// Async classifier: takes the user's message and the [Correction] block, breaks errors into 8 categories.
+async function classifyGrammarErrors(userText, correctionBlock, source){
+  if(!state.settings.apiKey) return;
+  if(!userText || userText.trim().split(/\s+/).length < 3) return;
+  if(!correctionBlock) return;
+
+  const catList = Object.entries(GRAMMAR_CATEGORIES)
+    .map(([key, info]) => `- ${key}: ${info.label} (${info.zh})`)
+    .join('\n');
+
+  const prompt = `You are a grammar error classifier for an ESL learner.
+
+Original learner message:
+"""
+${userText}
+"""
+
+A tutor identified these corrections:
+"""
+${correctionBlock}
+"""
+
+For each distinct error in the corrections, classify it into one or more of these categories:
+${catList}
+
+Return ONLY valid JSON:
+{
+  "errors": [
+    {
+      "userPart": "<the exact wrong word/phrase from the learner>",
+      "correctedPart": "<the corrected version>",
+      "categories": ["<category-key>", ...],
+      "pattern": "<short English description of the error pattern, max 80 chars>",
+      "tipZh": "<brief Chinese tip explaining the rule, max 100 chars>"
+    }
+  ]
+}
+
+Rules:
+- Only include real grammar errors. Skip stylistic preferences.
+- Each error gets 1–3 categories (use multiple only if it really spans multiple).
+- Use the exact category keys shown above (lowercase, no spaces). Skip any category that does not match.
+- If the corrections section has no real errors, return { "errors": [] }.`;
+
+  try{
+    const reply = await callGemini([{role:'user', text:prompt}], 'You are a JSON-only grammar classifier. Output valid JSON only — no prose, no fences.', { responseMimeType: 'application/json' });
+    if(!reply) return;
+    const cleaned = cleanGeminiText(reply);
+    const data = JSON.parse(cleaned);
+    if(!data || !Array.isArray(data.errors) || !data.errors.length) return;
+
+    const validKeys = Object.keys(GRAMMAR_CATEGORIES);
+    let added = 0;
+    data.errors.forEach(err => {
+      if(!err || typeof err.userPart !== 'string' || typeof err.correctedPart !== 'string') return;
+      const cats = Array.isArray(err.categories)
+        ? err.categories.filter(c => typeof c === 'string' && validKeys.includes(c))
+        : [];
+      if(!cats.length) return;
+      state.errorLog.push({
+        id: 'err_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+        ts: Date.now(),
+        userText: userText.slice(0, 400),
+        userPart: err.userPart.slice(0, 200),
+        correctedPart: err.correctedPart.slice(0, 200),
+        categories: cats.slice(0, 3),
+        pattern: typeof err.pattern === 'string' ? err.pattern.slice(0, 120) : '',
+        tipZh: typeof err.tipZh === 'string' ? err.tipZh.slice(0, 200) : '',
+        resolved: false,
+        source: source || 'chat'
+      });
+      added++;
+    });
+
+    if(added){
+      if(state.errorLog.length > ERROR_LOG_MAX){
+        state.errorLog = state.errorLog.slice(-ERROR_LOG_MAX);
+      }
+      saveState();
+      // If the Errors screen is currently shown, refresh it
+      if(typeof currentScreen !== 'undefined' && currentScreen === 'errors'){
+        renderErrors(document.getElementById('screen-errors'));
+      }
+    }
+  }catch(e){
+    console.warn('Grammar classifier failed:', e);
+  }
+}
+
+// Aggregates the error log for UI / drill consumption.
+function getErrorStats(){
+  const log = state.errorLog || [];
+  const active = log.filter(e => !e.resolved);
+  const byCategory = {};
+  Object.keys(GRAMMAR_CATEGORIES).forEach(cat => {
+    byCategory[cat] = active.filter(e => Array.isArray(e.categories) && e.categories.includes(cat));
+  });
+  const weekAgo = Date.now() - 7*24*60*60*1000;
+  const recentCount = active.filter(e => e.ts > weekAgo).length;
+  // Sort categories by active count desc
+  const ranked = Object.entries(byCategory)
+    .map(([cat, arr]) => ({ cat, count: arr.length, items: arr }))
+    .sort((a,b) => b.count - a.count);
+  return { byCategory, ranked, totalActive: active.length, totalResolved: log.length - active.length, recentCount };
+}
+
+function markErrorResolved(id){
+  const e = (state.errorLog||[]).find(x => x.id === id);
+  if(!e) return;
+  e.resolved = true;
+  saveState();
+  if(typeof currentScreen !== 'undefined' && currentScreen === 'errors'){
+    renderErrors(document.getElementById('screen-errors'));
+  }
+}
+
+function markCategoryResolved(category){
+  const log = state.errorLog || [];
+  let n = 0;
+  log.forEach(e => {
+    if(!e.resolved && Array.isArray(e.categories) && e.categories.includes(category)){
+      e.resolved = true; n++;
+    }
+  });
+  if(n){
+    saveState();
+    toast(`Marked ${n} ${GRAMMAR_CATEGORIES[category]?.label || category} errors resolved`);
+  }
+  if(typeof currentScreen !== 'undefined' && currentScreen === 'errors'){
+    renderErrors(document.getElementById('screen-errors'));
+  }
+}
+
+function clearResolvedErrors(){
+  if(!confirm('Permanently delete all resolved errors?')) return;
+  state.errorLog = (state.errorLog || []).filter(e => !e.resolved);
+  saveState();
+  toast('Resolved errors cleared');
+  if(typeof currentScreen !== 'undefined' && currentScreen === 'errors'){
+    renderErrors(document.getElementById('screen-errors'));
+  }
+}
+
+async function callGemini(messages, systemInstruction, options){
   const key = state.settings.apiKey;
   if(!key){ toast('Add your Gemini API key in Settings'); goTo('settings'); return null; }
   const contents = messages.map(m => {
@@ -5786,6 +6556,10 @@ async function callGemini(messages, systemInstruction){
   });
   const body = { contents };
   if(systemInstruction) body.systemInstruction = { parts:[{text:systemInstruction}] };
+  // Optional structured output: pass { responseMimeType: 'application/json' } to force valid JSON
+  if(options && options.responseMimeType){
+    body.generationConfig = Object.assign({}, body.generationConfig, { responseMimeType: options.responseMimeType });
+  }
   try{
     const res = await fetch(getGeminiUrl(key),
       { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
@@ -6020,11 +6794,13 @@ function startChat(scenarioId){
   const vocabWords = WORDS.filter(w=>scenario.categories.includes(w.category));
   shuffle(vocabWords);
   const targetWords = vocabWords.slice(0,8);
-  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null };
+  const ctx = buildChatContext();
+  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, srsReviewWords: ctx.reviewWords, flaggedHistory: new Set() };
+  let basePrompt;
   if(scenario.customPrompt){
-    chatState.systemPrompt = scenario.customPrompt;
+    basePrompt = scenario.customPrompt;
   } else {
-    chatState.systemPrompt = `You are a friendly Canadian person in this scenario: "${scenario.title}" - ${scenario.desc}.
+    basePrompt = `You are a friendly Canadian person in this scenario: "${scenario.title}" - ${scenario.desc}.
 Role-play naturally as the other person in this conversation. You are helping a newcomer to Canada practice English.
 Rules:
 - Keep responses SHORT (1-3 sentences max)
@@ -6036,6 +6812,7 @@ Rules:
 - Do NOT break character or mention that you're an AI
 Start the conversation by greeting the user in character.`;
   }
+  chatState.systemPrompt = basePrompt + ctx.promptBlock;
   goTo('chat');
   sendChatAI();
 }
@@ -6047,8 +6824,9 @@ function startCustomChat(){
   const vocabWords = WORDS;
   shuffle(vocabWords);
   const targetWords = vocabWords.slice(0,8);
-  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null };
-  chatState.systemPrompt = `You are a friendly Canadian person in this scenario: "${topic}".
+  const ctx = buildChatContext();
+  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, srsReviewWords: ctx.reviewWords, flaggedHistory: new Set() };
+  const basePrompt = `You are a friendly Canadian person in this scenario: "${topic}".
 Role-play naturally as the other person in this conversation. You are helping a newcomer to Canada practice English.
 Rules:
 - Keep responses SHORT (1-3 sentences max)
@@ -6059,6 +6837,7 @@ Rules:
 - Stay in character for the scenario
 - Do NOT break character or mention that you're an AI
 Start the conversation by greeting the user in character.`;
+  chatState.systemPrompt = basePrompt + ctx.promptBlock;
   goTo('chat');
   sendChatAI();
 }
@@ -6071,8 +6850,9 @@ function startFreeChat(){
   shuffle(reviewWords);
   const targetWords = reviewWords.slice(0,10);
   const wordList = targetWords.length ? targetWords.map(w => w.word + ' (' + w.definition + ')').join(', ') : 'none yet';
-  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, isFreeChat:true };
-  chatState.systemPrompt = `You are a bilingual English-Chinese language tutor for a Chinese speaker learning Canadian English.
+  const ctx = buildChatContext();
+  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, isFreeChat:true, srsReviewWords: ctx.reviewWords, flaggedHistory: new Set() };
+  const basePrompt = `You are a bilingual English-Chinese language tutor for a Chinese speaker learning Canadian English.
 Rules:
 - Chat freely about ANY topic the user wants to discuss
 - Respond naturally in English, keep responses concise (2-4 sentences)
@@ -6087,6 +6867,7 @@ Tip: [brief explanation in Chinese - why this is wrong and the correct usage]
 - Try to naturally incorporate these vocabulary words when relevant: ${wordList}
 - Be warm, patient, and encouraging
 Start by greeting the user warmly in English and asking what they'd like to chat about today.`;
+  chatState.systemPrompt = basePrompt + ctx.promptBlock;
   goTo('chat');
   sendChatAI();
 }
@@ -6099,13 +6880,37 @@ async function sendChatAI(){
     : chatState.aiMessages;
   const reply = await callGemini(msgs, chatState.systemPrompt);
   if(!reply){ renderChat(el,false); return; }
-  chatState.messages.push({role:'ai',text:reply});
+  const aiMsg = {role:'ai', text:reply, flaggedWords:null};
+  chatState.messages.push(aiMsg);
   chatState.aiMessages.push({role:'assistant',text:reply});
   chatState.targetWords.forEach(w=>{
     if(reply.toLowerCase().includes(w.word.toLowerCase())) chatState.usedWords.add(w.word);
   });
   renderChat(el, false);
   speak(reply);
+
+  // S1: Vocab Flagging Agent runs async — when it returns, attach to message and re-render
+  if(!chatState.flaggedHistory) chatState.flaggedHistory = new Set();
+  flagVocabAgent(reply, chatState.flaggedHistory).then(flagged => {
+    if(!flagged || !flagged.length) return;
+    if(!chatState || chatState.ended) return;
+    aiMsg.flaggedWords = flagged;
+    flagged.forEach(f => chatState.flaggedHistory.add((f.word||'').toLowerCase()));
+    const cur = document.getElementById('screen-chat');
+    if(cur && !chatState.ended) renderChat(cur, false);
+  }).catch(e => console.warn('Flagging error:', e));
+
+  // S4: Grammar classifier runs async if the AI reply contains a [Correction] block
+  const correctionBlock = parseCorrectionBlock(reply);
+  if(correctionBlock){
+    const lastUser = chatState.messages.filter(m => m.role === 'user').slice(-1)[0];
+    if(lastUser && lastUser.text){
+      const src = chatState.isFreeChat ? 'freechat'
+                : chatState.isLanguageParent ? 'langparent'
+                : (chatState.scenario && chatState.scenario.id ? 'scenario:' + chatState.scenario.id : 'chat');
+      classifyGrammarErrors(lastUser.text, correctionBlock, src).catch(e => console.warn('Grammar classifier error:', e));
+    }
+  }
 }
 
 async function sendChatUser(){
@@ -6182,6 +6987,8 @@ function chatVoiceInput(){
 
 async function endChat(){
   chatState.ended = true;
+  // S3: Fire profile update in background (don't await — it shouldn't block feedback)
+  updateProfileFromChat(chatState.messages.slice()).catch(e => console.warn('Profile update error:', e));
   const convo = chatState.messages.map(m=>`${m.role==='user'?'Learner':'Partner'}: ${m.text}`).join('\n');
   const targetList = chatState.targetWords.map(w=>`${w.word}: ${w.definition}`).join('\n');
   const feedbackPrompt = chatState.isLanguageParent
@@ -6318,15 +7125,25 @@ function renderChat(el, loading){
   const wordsHint = chatState.targetWords.map(w=>
     `<span class="chat-vocab-hint" style="${chatState.usedWords.has(w.word)?'background:rgba(0,184,148,.15);color:var(--green)':''}">${w.word}</span>`
   ).join('');
+  const srsBadge = (chatState.srsReviewWords && chatState.srsReviewWords.length)
+    ? `<span class="chat-srs-badge" title="今日复习词 (SRS): ${chatState.srsReviewWords.join(', ')}">🎒 SRS ${chatState.srsReviewWords.length}</span>`
+    : '';
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-size:13px;font-weight:600">${chatState.scenario.icon} ${chatState.scenario.title}</div>
+      <div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px">${chatState.scenario.icon} ${chatState.scenario.title}${srsBadge}</div>
       <button class="btn btn-sm btn-ghost" style="width:auto;min-height:32px;padding:4px 12px;font-size:12px" onclick="endChat()">End &amp; Review</button>
     </div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Try to use these words:</div>
     <div style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:2px">${wordsHint}</div>
     <div class="chat-messages" id="chat-messages">
-      ${chatState.messages.map((m,mi)=>`<div class="chat-bubble ${m.role==='user'?'chat-user':'chat-ai'}">${m.text.replace(/\n/g,'<br>')}${m.role==='ai'?` <button class="speak-btn" onclick="event.stopPropagation();speak(\`${m.text.replace(/\[Correction\][\s\S]*/,'').trim().replace(/`/g,'').replace(/\\/g,'\\\\')}\`)" style="font-size:14px;vertical-align:baseline">&#128264;</button><button class="chat-add-btn" onclick="event.stopPropagation();showAddWordFromChatModal()" title="Save a word">&#128218;+</button>`:''}${m.recIdx!==undefined?` <button class="speak-btn" onclick="event.stopPropagation();playRecording(${m.recIdx})" style="font-size:14px;vertical-align:baseline" title="Replay your voice">&#127911;</button><button class="retry-btn" onclick="event.stopPropagation();showPronPractice(${mi})" title="Practice pronunciation">&#128260;</button>`:''}</div>`).join('')}
+      ${chatState.messages.map((m,mi)=>{
+        const align = m.role==='user'?'flex-end':'flex-start';
+        const bubbleHtml = `<div class="chat-bubble ${m.role==='user'?'chat-user':'chat-ai'}">${highlightReviewWordsHtml(m.text, m.role, chatState.srsReviewWords)}${m.role==='ai'?` <button class="speak-btn" onclick="event.stopPropagation();speak(\`${m.text.replace(/\[Correction\][\s\S]*/,'').trim().replace(/`/g,'').replace(/\\/g,'\\\\')}\`)" style="font-size:14px;vertical-align:baseline">&#128264;</button><button class="chat-add-btn" onclick="event.stopPropagation();showAddWordFromChatModal()" title="Save a word">&#128218;+</button>`:''}${m.recIdx!==undefined?` <button class="speak-btn" onclick="event.stopPropagation();playRecording(${m.recIdx})" style="font-size:14px;vertical-align:baseline" title="Replay your voice">&#127911;</button><button class="retry-btn" onclick="event.stopPropagation();showPronPractice(${mi})" title="Practice pronunciation">&#128260;</button>`:''}</div>`;
+        const flagHtml = (m.role==='ai' && m.flaggedWords && m.flaggedWords.length)
+          ? `<div class="chat-flag-strip">${m.flaggedWords.map(fw => `<span class="chat-flag-chip" title="${(fw.brief||'').replace(/"/g,'&quot;')}">${fw.word}<button class="chat-flag-add" onclick="event.stopPropagation();showAddWordFromChatModal('${fw.word.replace(/'/g,"\\'")}')" title="Add to library">+</button></span>`).join('')}</div>`
+          : '';
+        return `<div class="chat-msg-row" style="display:flex;flex-direction:column;align-items:${align};max-width:100%">${bubbleHtml}${flagHtml}</div>`;
+      }).join('')}
       ${loading?'<div class="chat-bubble chat-ai"><div class="ai-loading"><span></span><span></span><span></span></div></div>':''}
     </div>
     ${voiceChatActive ? `
@@ -6469,8 +7286,9 @@ Give feedback in BOTH English and Chinese (中文). Keep it brief and encouragin
 }
 
 // ===== ADD WORD FROM CHAT =====
-function showAddWordFromChatModal(){
+function showAddWordFromChatModal(prefillWord){
   const root = document.getElementById('modal-root');
+  const prefill = (typeof prefillWord === 'string' ? prefillWord : '').replace(/"/g, '&quot;');
   root.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -6478,13 +7296,19 @@ function showAddWordFromChatModal(){
         <button onclick="closeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">&times;</button>
       </div>
       <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Type the word or phrase you want to save</p>
-      <input class="form-input" id="chat-add-word-input" placeholder="e.g. potluck">
+      <input class="form-input" id="chat-add-word-input" placeholder="e.g. potluck" value="${prefill}">
       <div id="chat-add-word-status"></div>
       <button class="btn mt" id="chat-add-word-btn" onclick="addWordFromChatInput()">Add with AI Auto-fill</button>
     </div>
   </div>`;
   root.style.display = 'flex';
-  setTimeout(()=>{const inp=document.getElementById('chat-add-word-input');if(inp)inp.focus();},100);
+  setTimeout(()=>{
+    const inp = document.getElementById('chat-add-word-input');
+    if(inp){
+      inp.focus();
+      if(prefill) inp.select();
+    }
+  }, 100);
 }
 
 async function addWordFromChatInput(){
@@ -6804,8 +7628,9 @@ function startLanguageParent(){
   shuffle(reviewWords);
   const targetWords = reviewWords.slice(0,10);
   const wordList = targetWords.length ? targetWords.map(w => w.word + ' (' + w.definition + ')').join(', ') : 'none yet';
-  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, isFreeChat:false, isLanguageParent:true };
-  chatState.systemPrompt = `You are a Language Parent — a warm, patient conversation partner for an adult ESL learner in Canada. You follow Chris Lonsdale's Language Parent method.
+  const ctx = buildChatContext();
+  chatState = { scenario, targetWords, messages:[], aiMessages:[], usedWords:new Set(), ended:false, feedback:null, isFreeChat:false, isLanguageParent:true, srsReviewWords: ctx.reviewWords, flaggedHistory: new Set() };
+  const basePrompt = `You are a Language Parent — a warm, patient conversation partner for an adult ESL learner in Canada. You follow Chris Lonsdale's Language Parent method.
 
 Your rules:
 1. **Speak simply** — use short sentences (5-10 words), common words, present tense mostly. Match the learner's level.
@@ -6821,6 +7646,7 @@ Your rules:
 The learner is studying these words (use them naturally when relevant): ${wordList}
 
 Start by warmly greeting the learner and asking a simple, friendly question about their day.`;
+  chatState.systemPrompt = basePrompt + ctx.promptBlock;
   goTo('chat');
   sendChatAI();
 }
@@ -7707,7 +8533,10 @@ function renderVocabTestResults(el){
       <button class="btn mb" onclick="startBulkImport('ngsl-1k')" style="width:100%;background:linear-gradient(135deg,var(--blue),#0984e3)">
         Import NGSL 1K (top 1000 words) ${VMAP_NGSL_1K.length === 0 ? '— pending data' : '— ' + VMAP_NGSL_1K.length + ' words'}
       </button>
-      <div style="font-size:10px;color:var(--text3);margin-top:6px">More lists coming: NGSL 2-3K (1800 words), COCA 4-6K (1000 words)</div>
+      <button class="btn mb" onclick="startBulkImport('ngsl-2k')" style="width:100%;background:linear-gradient(135deg,#74b9ff,var(--accent))">
+        Import NGSL 2K (next-tier words) ${VMAP_NGSL_2K.length === 0 ? '— pending data' : '— ' + VMAP_NGSL_2K.length + ' words'}
+      </button>
+      <div style="font-size:10px;color:var(--text3);margin-top:6px">More lists coming: NGSL 2K rest (~800 more), COCA 4-6K (1000 words)</div>
     </div>
 
     ${!(vtest.words && vtest.words.length > 0) ? `
@@ -8697,6 +9526,650 @@ const VMAP_NGSL_1K = [
 {w:'meanwhile',d:'at the same time',e:'I clean while meanwhile he packs.',dom:'business',b:'1K'},
 ];
 
+// NGSL 2K — words 1001-2000 range, hand-authored 2026-04-27 (200 of 1000 — first batch)
+// Same compact format as NGSL 1K. Mostly Canadian workplace examples.
+const VMAP_NGSL_2K = [
+// === Verbs (60) ===
+{w:'expand',d:'to grow larger',e:'We plan to expand to two shifts.',dom:'business',b:'2K'},
+{w:'indicate',d:'to show or point out',e:'Please indicate your preferred start date.',dom:'business',b:'2K'},
+{w:'examine',d:'to look at carefully',e:'The inspector will examine the equipment Tuesday.',dom:'business',b:'2K'},
+{w:'evaluate',d:'to judge the value of',e:'We evaluate every safety incident.',dom:'business',b:'2K'},
+{w:'predict',d:'to say what will happen later',e:'It is hard to predict the weather here.',dom:'daily',b:'2K'},
+{w:'repair',d:'to fix something broken',e:'The forklift is in for repair.',dom:'business',b:'2K'},
+{w:'recover',d:'to get back to normal',e:'It took a week to recover from the flu.',dom:'daily',b:'2K'},
+{w:'reject',d:'to refuse to accept',e:'The supervisor rejected the timesheet.',dom:'business',b:'2K'},
+{w:'request',d:'to ask for politely',e:'I requested next Friday off.',dom:'business',b:'2K'},
+{w:'require',d:'to need something',e:'This job requires steel-toe boots.',dom:'business',b:'2K'},
+{w:'reserve',d:'to save for later use',e:'I reserved the meeting room for 2pm.',dom:'business',b:'2K'},
+{w:'resist',d:'to fight against',e:'The new lock resists rust well.',dom:'business',b:'2K'},
+{w:'resolve',d:'to find a solution',e:'We resolved the inventory mistake quickly.',dom:'business',b:'2K'},
+{w:'respond',d:'to reply or react',e:'Please respond to the email by noon.',dom:'business',b:'2K'},
+{w:'restore',d:'to bring back to original',e:'IT restored the file from backup.',dom:'business',b:'2K'},
+{w:'supply',d:'to provide what is needed',e:'The company supplies safety vests.',dom:'business',b:'2K'},
+{w:'suspect',d:'to think something is true',e:'I suspect the scanner battery is dying.',dom:'daily',b:'2K'},
+{w:'transfer',d:'to move from one place to another',e:'I want to transfer to night shift.',dom:'business',b:'2K'},
+{w:'transform',d:'to change completely',e:'Automation transformed the warehouse.',dom:'business',b:'2K'},
+{w:'translate',d:'to change between languages',e:'Can you translate this safety notice?',dom:'business',b:'2K'},
+{w:'transport',d:'to carry from place to place',e:'We transport goods across BC.',dom:'business',b:'2K'},
+{w:'achieve',d:'to succeed in doing',e:'I achieved my training target.',dom:'business',b:'2K'},
+{w:'acquire',d:'to gain or obtain',e:'I acquired forklift certification last month.',dom:'business',b:'2K'},
+{w:'address',d:'to deal with a problem',e:'We need to address the late deliveries.',dom:'business',b:'2K'},
+{w:'adjust',d:'to change slightly',e:'Adjust the strap before lifting.',dom:'business',b:'2K'},
+{w:'adopt',d:'to start using something new',e:'The site adopted a new safety policy.',dom:'business',b:'2K'},
+{w:'advance',d:'to move forward',e:'I want to advance in this company.',dom:'business',b:'2K'},
+{w:'advise',d:'to give advice',e:'My mentor advised me to take the course.',dom:'business',b:'2K'},
+{w:'analyze',d:'to study in detail',e:'Let us analyze last month results.',dom:'business',b:'2K'},
+{w:'appoint',d:'to choose for a position',e:'She was appointed team lead.',dom:'business',b:'2K'},
+{w:'argue',d:'to disagree with reasons',e:'Two coworkers argued about the schedule.',dom:'daily',b:'2K'},
+{w:'assess',d:'to estimate value',e:'The trainer assesses skills weekly.',dom:'business',b:'2K'},
+{w:'assign',d:'to give a task to someone',e:'I was assigned to the receiving desk.',dom:'business',b:'2K'},
+{w:'assist',d:'to help',e:'Can you assist the new hire?',dom:'business',b:'2K'},
+{w:'assume',d:'to think without proof',e:'Do not assume the truck has arrived.',dom:'business',b:'2K'},
+{w:'assure',d:'to promise confidently',e:'I assure you the order will ship today.',dom:'business',b:'2K'},
+{w:'attach',d:'to fasten or join',e:'Please attach the receipt to the form.',dom:'business',b:'2K'},
+{w:'attract',d:'to draw interest',e:'Good benefits attract strong applicants.',dom:'business',b:'2K'},
+{w:'balance',d:'to keep things equal',e:'I balance work and family carefully.',dom:'daily',b:'2K'},
+{w:'base',d:'to build on a foundation',e:'I base my decisions on data.',dom:'business',b:'2K'},
+{w:'blame',d:'to say someone caused a problem',e:'Do not blame the new hire.',dom:'daily',b:'2K'},
+{w:'boost',d:'to increase or improve',e:'Coffee boosts my mood.',dom:'colloquial',b:'2K'},
+{w:'capture',d:'to catch or record',e:'The camera captured the incident.',dom:'business',b:'2K'},
+{w:'calculate',d:'to work out with numbers',e:'I calculate my mileage every week.',dom:'business',b:'2K'},
+{w:'cancel',d:'to call off',e:'They cancelled the safety meeting.',dom:'business',b:'2K'},
+{w:'challenge',d:'a difficult task',e:'Night shift is a real challenge.',dom:'business',b:'2K'},
+{w:'claim',d:'to say something is true',e:'He claimed the parking spot was his.',dom:'daily',b:'2K'},
+
+// === Nouns (60) ===
+{w:'response',d:'an answer or reaction',e:'I expect a response by Monday.',dom:'business',b:'2K'},
+{w:'focus',d:'main attention or center',e:'Safety is our main focus this quarter.',dom:'business',b:'2K'},
+{w:'strategy',d:'a plan to achieve a goal',e:'Our strategy is to ship faster.',dom:'business',b:'2K'},
+{w:'region',d:'a specific area',e:'I work in the Lower Mainland region.',dom:'canadian',b:'2K'},
+{w:'factor',d:'one cause among many',e:'Weather is a big factor in shipping delays.',dom:'business',b:'2K'},
+{w:'fund',d:'money set aside for a purpose',e:'The training fund is almost gone.',dom:'business',b:'2K'},
+{w:'route',d:'a path from one place to another',e:'I take the same route to work daily.',dom:'daily',b:'2K'},
+{w:'vehicle',d:'a thing for carrying people or goods',e:'Park the company vehicle by the dock.',dom:'business',b:'2K'},
+{w:'demand',d:'a strong request',e:'Customer demand is up this season.',dom:'business',b:'2K'},
+{w:'signal',d:'a sign that gives information',e:'The horn signal means the truck is reversing.',dom:'business',b:'2K'},
+{w:'range',d:'a set between two limits',e:'My pay range is competitive.',dom:'business',b:'2K'},
+{w:'asset',d:'something valuable owned',e:'A bilingual employee is a real asset.',dom:'business',b:'2K'},
+{w:'element',d:'a basic part',e:'Trust is a key element of teamwork.',dom:'academic',b:'2K'},
+{w:'resource',d:'useful supply or skill',e:'The intranet is a great training resource.',dom:'business',b:'2K'},
+{w:'opportunity',d:'a chance to do something',e:'This is a great career opportunity.',dom:'business',b:'2K'},
+{w:'advantage',d:'a benefit or favorable point',e:'Working overtime has advantages.',dom:'business',b:'2K'},
+{w:'attempt',d:'a try at doing something',e:'My first attempt at the test failed.',dom:'business',b:'2K'},
+{w:'audience',d:'people watching or listening',e:'The audience asked good questions.',dom:'academic',b:'2K'},
+{w:'average',d:'the typical amount',e:'My average shift is nine hours.',dom:'business',b:'2K'},
+{w:'basis',d:'a starting point or reason',e:'On what basis did you decide?',dom:'academic',b:'2K'},
+{w:'behavior',d:'how someone acts',e:'Workplace behavior matters.',dom:'business',b:'2K'},
+{w:'benefit',d:'a useful gain',e:'Health benefits start after 90 days.',dom:'canadian',b:'2K'},
+{w:'branch',d:'a part of a larger thing',e:'The Burnaby branch handles returns.',dom:'business',b:'2K'},
+{w:'brand',d:'a company name and image',e:'IKEA is a well-known brand in Canada.',dom:'canadian',b:'2K'},
+{w:'capital',d:'money or main city',e:'Ottawa is the capital of Canada.',dom:'canadian',b:'2K'},
+{w:'category',d:'a group of similar things',e:'Sort the boxes by category.',dom:'business',b:'2K'},
+{w:'ceremony',d:'a formal event',e:'The retirement ceremony is on Friday.',dom:'business',b:'2K'},
+{w:'character',d:'a person qualities',e:'He has strong character.',dom:'daily',b:'2K'},
+{w:'chart',d:'a diagram showing information',e:'Check the chart for your shift times.',dom:'business',b:'2K'},
+{w:'circumstance',d:'a fact or condition of a situation',e:'Under the circumstances, we agreed.',dom:'academic',b:'2K'},
+{w:'client',d:'a person who buys services',e:'Our biggest client is in Surrey.',dom:'business',b:'2K'},
+{w:'code',d:'a system of rules or symbols',e:'Memorize the entry code.',dom:'business',b:'2K'},
+{w:'comment',d:'a remark or opinion',e:'The manager added a comment to my report.',dom:'business',b:'2K'},
+{w:'committee',d:'a group with a task',e:'I joined the safety committee.',dom:'business',b:'2K'},
+{w:'community',d:'a group of people who share something',e:'Our work community is supportive.',dom:'daily',b:'2K'},
+{w:'consequence',d:'a result of an action',e:'There were consequences for the late delivery.',dom:'business',b:'2K'},
+{w:'consumer',d:'a person who buys things',e:'Canadian consumers want fast shipping.',dom:'business',b:'2K'},
+{w:'context',d:'the situation around something',e:'In this context, that word means rejected.',dom:'academic',b:'2K'},
+{w:'contribution',d:'something added or given',e:'Your contribution to the project mattered.',dom:'business',b:'2K'},
+{w:'council',d:'a group that advises or governs',e:'The city council voted last night.',dom:'canadian',b:'2K'},
+{w:'criterion',d:'a standard for judging',e:'Speed is one criterion for promotion.',dom:'academic',b:'2K'},
+{w:'decade',d:'ten years',e:'I have lived here for a decade.',dom:'daily',b:'2K'},
+{w:'expense',d:'money spent',e:'I track my work expenses monthly.',dom:'business',b:'2K'},
+{w:'feature',d:'an important characteristic',e:'The new app has useful features.',dom:'business',b:'2K'},
+{w:'framework',d:'a basic structure',e:'We follow a clear safety framework.',dom:'academic',b:'2K'},
+{w:'gain',d:'an increase or improvement',e:'Recent gains in efficiency are clear.',dom:'business',b:'2K'},
+{w:'guidance',d:'advice or help',e:'The trainer gives strong guidance.',dom:'business',b:'2K'},
+{w:'headline',d:'a top line of a news story',e:'Did you see the strike headline?',dom:'daily',b:'2K'},
+{w:'identity',d:'who someone is',e:'Bring photo ID to confirm your identity.',dom:'canadian',b:'2K'},
+{w:'impact',d:'a strong effect',e:'Bad weather has a big impact on shipping.',dom:'business',b:'2K'},
+{w:'initiative',d:'a new plan or first action',e:'The recycling initiative starts in May.',dom:'business',b:'2K'},
+{w:'option',d:'a choice between things',e:'Direct deposit is the default option.',dom:'business',b:'2K'},
+
+// === Adjectives (50) ===
+{w:'actual',d:'real, not estimated',e:'The actual cost was higher than quoted.',dom:'business',b:'2K'},
+{w:'alternative',d:'another option',e:'Is there an alternative route to work?',dom:'daily',b:'2K'},
+{w:'ancient',d:'very old',e:'We found an ancient pallet behind the rack.',dom:'colloquial',b:'2K'},
+{w:'anxious',d:'worried or nervous',e:'I was anxious about the interview.',dom:'daily',b:'2K'},
+{w:'approximate',d:'close but not exact',e:'The approximate time is 2pm.',dom:'business',b:'2K'},
+{w:'aware',d:'knowing about something',e:'Are you aware of the new rule?',dom:'business',b:'2K'},
+{w:'beneficial',d:'helpful or useful',e:'Stretching is beneficial before lifting.',dom:'business',b:'2K'},
+{w:'brief',d:'short in time',e:'The meeting was brief but useful.',dom:'business',b:'2K'},
+{w:'capable',d:'able to do something',e:'She is capable of training others.',dom:'business',b:'2K'},
+{w:'central',d:'in the middle, important',e:'Safety is central to our work.',dom:'business',b:'2K'},
+{w:'commercial',d:'related to business',e:'This vehicle is for commercial use only.',dom:'business',b:'2K'},
+{w:'comprehensive',d:'covering everything',e:'The orientation is comprehensive.',dom:'business',b:'2K'},
+{w:'conscious',d:'aware and awake',e:'Be conscious of your posture when lifting.',dom:'daily',b:'2K'},
+{w:'consistent',d:'always the same',e:'Her work quality is consistent.',dom:'business',b:'2K'},
+{w:'constant',d:'happening all the time',e:'There is constant noise on the floor.',dom:'business',b:'2K'},
+{w:'contemporary',d:'modern, current',e:'The store has a contemporary look.',dom:'business',b:'2K'},
+{w:'corporate',d:'related to a large company',e:'Corporate sent a memo today.',dom:'business',b:'2K'},
+{w:'current',d:'happening now',e:'My current address is in Coquitlam.',dom:'canadian',b:'2K'},
+{w:'decisive',d:'showing firm decision',e:'She is decisive under pressure.',dom:'business',b:'2K'},
+{w:'definite',d:'clear and certain',e:'I need a definite answer by Tuesday.',dom:'business',b:'2K'},
+{w:'deliberate',d:'done on purpose',e:'It was a deliberate choice to slow down.',dom:'business',b:'2K'},
+{w:'distinct',d:'clearly different',e:'There is a distinct sound when the belt jams.',dom:'business',b:'2K'},
+{w:'diverse',d:'different in kind',e:'Our team is diverse and strong.',dom:'business',b:'2K'},
+{w:'domestic',d:'within one country or home',e:'Most flights are domestic.',dom:'canadian',b:'2K'},
+{w:'dramatic',d:'big and noticeable',e:'There was a dramatic drop in errors.',dom:'business',b:'2K'},
+{w:'dynamic',d:'changing or active',e:'The market is very dynamic now.',dom:'business',b:'2K'},
+{w:'ecological',d:'related to environment',e:'Ecological work pays well in BC.',dom:'canadian',b:'2K'},
+{w:'effective',d:'producing the wanted result',e:'The new process is more effective.',dom:'business',b:'2K'},
+{w:'efficient',d:'working without waste',e:'The new sorter is very efficient.',dom:'business',b:'2K'},
+{w:'eligible',d:'qualified to do something',e:'You are eligible for benefits after 90 days.',dom:'canadian',b:'2K'},
+{w:'eventual',d:'happening at the end',e:'My eventual goal is to manage a team.',dom:'business',b:'2K'},
+{w:'exclusive',d:'limited to certain people',e:'This deal is exclusive to staff.',dom:'business',b:'2K'},
+{w:'existing',d:'already there',e:'Use the existing template, do not start over.',dom:'business',b:'2K'},
+{w:'explicit',d:'clearly stated',e:'My explicit instructions were ignored.',dom:'business',b:'2K'},
+{w:'extensive',d:'large in amount',e:'I have extensive warehouse experience.',dom:'business',b:'2K'},
+{w:'external',d:'outside something',e:'Use the external door for deliveries.',dom:'business',b:'2K'},
+{w:'extreme',d:'very great in degree',e:'Take care in extreme heat.',dom:'business',b:'2K'},
+{w:'familiar',d:'well-known to you',e:'The route is familiar by now.',dom:'daily',b:'2K'},
+{w:'financial',d:'related to money',e:'I need financial advice this year.',dom:'business',b:'2K'},
+{w:'flexible',d:'able to change easily',e:'My hours are flexible.',dom:'business',b:'2K'},
+{w:'formal',d:'following official rules',e:'Wear formal clothes for the interview.',dom:'business',b:'2K'},
+{w:'fortunate',d:'lucky',e:'I am fortunate to have this job.',dom:'daily',b:'2K'},
+{w:'frequent',d:'happening often',e:'Frequent breaks help on long shifts.',dom:'business',b:'2K'},
+{w:'fundamental',d:'basic and important',e:'Honesty is fundamental to teamwork.',dom:'academic',b:'2K'},
+{w:'generous',d:'giving more than expected',e:'My boss is generous with praise.',dom:'daily',b:'2K'},
+{w:'genuine',d:'real, not fake',e:'She has a genuine smile.',dom:'daily',b:'2K'},
+{w:'gradual',d:'happening slowly',e:'Improvement was gradual but real.',dom:'business',b:'2K'},
+{w:'grateful',d:'feeling thanks',e:'I am grateful for the training.',dom:'daily',b:'2K'},
+
+// === Adverbs / Connectors (15) ===
+{w:'mainly',d:'mostly',e:'I mainly handle inbound shipments.',dom:'business',b:'2K'},
+{w:'normally',d:'usually',e:'I normally start at 6am.',dom:'business',b:'2K'},
+{w:'occasionally',d:'sometimes',e:'I occasionally cover the weekend shift.',dom:'business',b:'2K'},
+{w:'currently',d:'at present',e:'I am currently between roles.',dom:'business',b:'2K'},
+{w:'eventually',d:'in the end, after time',e:'The package eventually arrived.',dom:'daily',b:'2K'},
+{w:'generally',d:'in most cases',e:'Generally speaking, mornings are quieter.',dom:'business',b:'2K'},
+{w:'gradually',d:'little by little',e:'I gradually learned the routine.',dom:'business',b:'2K'},
+{w:'ideally',d:'in the perfect case',e:'Ideally, we finish loading by 4pm.',dom:'business',b:'2K'},
+{w:'immediately',d:'right away',e:'Report any spills immediately.',dom:'business',b:'2K'},
+{w:'increasingly',d:'more and more',e:'Online orders are increasingly common.',dom:'business',b:'2K'},
+{w:'indeed',d:'certainly, in fact',e:'It was a difficult day, indeed.',dom:'daily',b:'2K'},
+{w:'initially',d:'at the beginning',e:'Initially, the system was confusing.',dom:'business',b:'2K'},
+{w:'ultimately',d:'in the end, finally',e:'Ultimately, the project succeeded.',dom:'business',b:'2K'},
+
+// === Phrasal verbs (15) ===
+{w:'back up',d:'to support; to make a copy',e:'I always back up my files on Friday.',dom:'phrasal',b:'2K'},
+{w:'bring up',d:'to mention; to raise children',e:'I should bring up the schedule issue.',dom:'phrasal',b:'2K'},
+{w:'call off',d:'to cancel',e:'They called off the meeting.',dom:'phrasal',b:'2K'},
+{w:'carry out',d:'to do or perform a task',e:'We carry out the audit every six months.',dom:'phrasal',b:'2K'},
+{w:'deal with',d:'to handle a problem',e:'I will deal with the angry customer.',dom:'phrasal',b:'2K'},
+{w:'fill in',d:'to complete a form; to substitute',e:'Please fill in the absence form.',dom:'phrasal',b:'2K'},
+{w:'follow up',d:'to check on something later',e:'I will follow up with HR tomorrow.',dom:'phrasal',b:'2K'},
+{w:'get along',d:'to have a good relationship',e:'I get along with everyone on my team.',dom:'phrasal',b:'2K'},
+{w:'look into',d:'to investigate',e:'IT will look into the login problem.',dom:'phrasal',b:'2K'},
+{w:'point out',d:'to draw attention to',e:'My trainer pointed out my mistake.',dom:'phrasal',b:'2K'},
+{w:'run out',d:'to use the last of something',e:'We ran out of packing tape.',dom:'phrasal',b:'2K'},
+
+// === Replacements for 29 duplicates removed against NGSL 1K + VMAP test bank ===
+{w:'enhance',d:'to make better in quality',e:'Training enhances job security.',dom:'business',b:'2K'},
+{w:'enable',d:'to make possible',e:'The badge enables access to the back room.',dom:'business',b:'2K'},
+{w:'establish',d:'to set up firmly',e:'We need to establish a clear handoff process.',dom:'business',b:'2K'},
+{w:'extend',d:'to make longer or larger',e:'Can we extend the deadline by a day?',dom:'business',b:'2K'},
+{w:'justify',d:'to give a good reason for',e:'How do you justify the extra cost?',dom:'business',b:'2K'},
+{w:'monitor',d:'to watch and check',e:'I monitor the conveyor belt all shift.',dom:'business',b:'2K'},
+{w:'negotiate',d:'to discuss to reach agreement',e:'We negotiated a higher hourly rate.',dom:'business',b:'2K'},
+{w:'observe',d:'to watch carefully',e:'Observe how the lead trains the new hires.',dom:'business',b:'2K'},
+{w:'perceive',d:'to notice or understand',e:'The team perceives him as fair.',dom:'academic',b:'2K'},
+{w:'capacity',d:'how much something can hold',e:'The truck has a 40-pallet capacity.',dom:'business',b:'2K'},
+{w:'concern',d:'something that worries you',e:'My main concern is winter driving.',dom:'business',b:'2K'},
+{w:'dimension',d:'a measurement like length or width',e:'Check the box dimensions before shipping.',dom:'business',b:'2K'},
+{w:'division',d:'a major part of an organization',e:'I work in the cold-storage division.',dom:'business',b:'2K'},
+{w:'emphasis',d:'special importance given',e:'Our team puts emphasis on punctuality.',dom:'business',b:'2K'},
+{w:'estimate',d:'an approximate calculation',e:'Give me a rough estimate of the work.',dom:'business',b:'2K'},
+{w:'feedback',d:'comments on how someone is doing',e:'Performance feedback is given quarterly.',dom:'business',b:'2K'},
+{w:'instance',d:'a specific case or example',e:'In this instance, the customer was right.',dom:'business',b:'2K'},
+{w:'outcome',d:'the final result',e:'The outcome of the audit was positive.',dom:'business',b:'2K'},
+{w:'legitimate',d:'allowed by rules; valid',e:'That is a legitimate complaint.',dom:'business',b:'2K'},
+{w:'logical',d:'reasonable; making sense',e:'The next logical step is more training.',dom:'academic',b:'2K'},
+{w:'major',d:'large or important',e:'There was a major spill in receiving.',dom:'business',b:'2K'},
+{w:'mutual',d:'shared by two or more people',e:'We have mutual respect on this team.',dom:'business',b:'2K'},
+{w:'notable',d:'worth noticing',e:'There is a notable drop in errors this month.',dom:'business',b:'2K'},
+{w:'roughly',d:'approximately, about',e:'I unload roughly 200 boxes per shift.',dom:'business',b:'2K'},
+{w:'break down',d:'to stop working; to analyze',e:'My car broke down on the highway.',dom:'phrasal',b:'2K'},
+{w:'carry on',d:'to continue doing',e:'Carry on with what you were doing.',dom:'phrasal',b:'2K'},
+
+// ===== Batch 2 (added 2026-04-27) — another 200 NGSL 2K-range words =====
+
+// === Verbs (50) ===
+{w:'abandon',d:'to leave behind for good',e:'They abandoned the warehouse plan.',dom:'business',b:'2K'},
+{w:'absorb',d:'to take in or soak up',e:'The towel absorbs spills quickly.',dom:'daily',b:'2K'},
+{w:'accommodate',d:'to make room or fit a need',e:'We accommodated her schedule request.',dom:'business',b:'2K'},
+{w:'accompany',d:'to go along with',e:'A supervisor must accompany new drivers.',dom:'business',b:'2K'},
+{w:'accumulate',d:'to gather over time',e:'Vacation hours accumulate each pay period.',dom:'business',b:'2K'},
+{w:'accuse',d:'to blame for wrongdoing',e:'No one was accused of the missing stock.',dom:'business',b:'2K'},
+{w:'acknowledge',d:'to admit or recognize',e:'Acknowledge receipt of the package.',dom:'business',b:'2K'},
+{w:'anticipate',d:'to expect in advance',e:'We anticipate heavy snow tonight.',dom:'business',b:'2K'},
+{w:'appeal',d:'to ask formally; to attract',e:'I will appeal the parking fine.',dom:'business',b:'2K'},
+{w:'assemble',d:'to put together',e:'The team assembles every Monday at 8.',dom:'business',b:'2K'},
+{w:'associate',d:'to connect in your mind',e:'I associate Vancouver with rain.',dom:'daily',b:'2K'},
+{w:'attain',d:'to reach a goal',e:'She attained her forklift cert in two weeks.',dom:'business',b:'2K'},
+{w:'authorize',d:'to give official permission',e:'Only managers can authorize overtime.',dom:'business',b:'2K'},
+{w:'bend',d:'to make curved',e:'Bend your knees when you lift.',dom:'business',b:'2K'},
+{w:'broadcast',d:'to send out widely',e:'They broadcast safety alerts on the PA.',dom:'business',b:'2K'},
+{w:'burst',d:'to break open suddenly',e:'The bag burst on the conveyor.',dom:'business',b:'2K'},
+{w:'bury',d:'to put under ground or cover up',e:'Snow buried the parking lot.',dom:'canadian',b:'2K'},
+{w:'classify',d:'to sort into groups',e:'Classify the returns by reason.',dom:'business',b:'2K'},
+{w:'coach',d:'to teach or train',e:'My lead coaches me on safe lifting.',dom:'business',b:'2K'},
+{w:'command',d:'to give an order',e:'The captain commands the ship.',dom:'academic',b:'2K'},
+{w:'commence',d:'to begin formally',e:'The audit commences at 9am.',dom:'business',b:'2K'},
+{w:'compete',d:'to try to do better than others',e:'Two stores compete for the same customers.',dom:'business',b:'2K'},
+{w:'compile',d:'to gather and put together',e:'I compile the weekly damage report.',dom:'business',b:'2K'},
+{w:'compose',d:'to make up; to write',e:'She composed a polite reply.',dom:'business',b:'2K'},
+{w:'confirm',d:'to verify or make certain',e:'Please confirm the meeting time.',dom:'business',b:'2K'},
+{w:'confront',d:'to face directly',e:'I had to confront him about the late slip.',dom:'business',b:'2K'},
+{w:'confuse',d:'to make unclear',e:'Two policies confused the new staff.',dom:'business',b:'2K'},
+{w:'connect',d:'to join together',e:'Connect the printer cable to the laptop.',dom:'business',b:'2K'},
+{w:'consume',d:'to use up',e:'Cold storage consumes a lot of power.',dom:'business',b:'2K'},
+{w:'convert',d:'to change to a different form',e:'Convert the price to Canadian dollars.',dom:'canadian',b:'2K'},
+{w:'cooperate',d:'to work together',e:'All teams must cooperate during the audit.',dom:'business',b:'2K'},
+{w:'coordinate',d:'to organize so things work together',e:'I coordinate truck arrivals.',dom:'business',b:'2K'},
+{w:'criticize',d:'to point out faults',e:'Try not to criticize without offering help.',dom:'business',b:'2K'},
+{w:'declare',d:'to state firmly',e:'Declare any cash over CAD 10,000 at customs.',dom:'canadian',b:'2K'},
+{w:'define',d:'to explain clearly',e:'Define your role on the project.',dom:'business',b:'2K'},
+{w:'delay',d:'to postpone or be late',e:'Snow delayed every morning truck.',dom:'business',b:'2K'},
+{w:'depart',d:'to leave a place',e:'My train departs at 6:15.',dom:'daily',b:'2K'},
+{w:'depict',d:'to show in a picture or words',e:'The chart depicts last quarter sales.',dom:'academic',b:'2K'},
+{w:'derive',d:'to come from a source',e:'The word derives from Latin.',dom:'academic',b:'2K'},
+{w:'designate',d:'to officially assign',e:'This zone is designated for staff only.',dom:'business',b:'2K'},
+{w:'detect',d:'to notice or sense',e:'The sensor detects motion at the gate.',dom:'business',b:'2K'},
+{w:'determine',d:'to decide or find out',e:'We must determine the root cause.',dom:'business',b:'2K'},
+{w:'devote',d:'to give time or effort to',e:'I devote one hour daily to training.',dom:'business',b:'2K'},
+{w:'diminish',d:'to become smaller',e:'Demand diminishes after the holidays.',dom:'business',b:'2K'},
+{w:'disclose',d:'to make known',e:'You must disclose any conflict of interest.',dom:'business',b:'2K'},
+{w:'dismiss',d:'to send away; to fire',e:'He was dismissed for repeated lateness.',dom:'business',b:'2K'},
+{w:'distinguish',d:'to tell apart',e:'I cannot distinguish the two brands.',dom:'business',b:'2K'},
+{w:'distribute',d:'to give out to many',e:'Distribute the new uniforms tomorrow.',dom:'business',b:'2K'},
+{w:'donate',d:'to give without payment',e:'The store donates leftover food weekly.',dom:'canadian',b:'2K'},
+
+// === Nouns (70) ===
+{w:'ability',d:'skill or capability',e:'She has the ability to lead a team.',dom:'business',b:'2K'},
+{w:'accident',d:'an unexpected harmful event',e:'The accident closed the highway.',dom:'daily',b:'2K'},
+{w:'accuracy',d:'being free of mistakes',e:'Accuracy matters more than speed at packout.',dom:'business',b:'2K'},
+{w:'agency',d:'an organization that provides a service',e:'A staffing agency placed me here.',dom:'business',b:'2K'},
+{w:'agenda',d:'a list of things to discuss',e:'Send the agenda before the meeting.',dom:'business',b:'2K'},
+{w:'agent',d:'someone acting for another',e:'A real-estate agent helped us rent.',dom:'canadian',b:'2K'},
+{w:'agriculture',d:'farming as an industry',e:'Agriculture is big in the Fraser Valley.',dom:'canadian',b:'2K'},
+{w:'alliance',d:'a formal partnership',e:'The two unions formed an alliance.',dom:'business',b:'2K'},
+{w:'ambition',d:'a strong desire to achieve',e:'My ambition is to manage a warehouse.',dom:'business',b:'2K'},
+{w:'anniversary',d:'the date marking a past event',e:'My one-year work anniversary is Friday.',dom:'business',b:'2K'},
+{w:'anxiety',d:'a feeling of worry',e:'Job interviews give me anxiety.',dom:'daily',b:'2K'},
+{w:'apology',d:'an expression of regret',e:'A short apology often fixes a tense moment.',dom:'business',b:'2K'},
+{w:'application',d:'a formal request',e:'I submitted my application online.',dom:'business',b:'2K'},
+{w:'arrival',d:'the act of getting somewhere',e:'Arrival times are posted at the dock.',dom:'business',b:'2K'},
+{w:'artist',d:'someone who creates art',e:'The graphic artist designed our flyers.',dom:'business',b:'2K'},
+{w:'aspect',d:'one feature or part',e:'Safety is the most important aspect.',dom:'business',b:'2K'},
+{w:'assembly',d:'a group gathered together',e:'Quarterly assembly is in the canteen.',dom:'business',b:'2K'},
+{w:'association',d:'an organized group',e:'The trade association helps small employers.',dom:'business',b:'2K'},
+{w:'assumption',d:'something believed without proof',e:'My assumption was wrong.',dom:'academic',b:'2K'},
+{w:'atmosphere',d:'the feeling of a place',e:'The atmosphere is friendly here.',dom:'daily',b:'2K'},
+{w:'attendance',d:'being present somewhere',e:'Attendance is tracked daily.',dom:'business',b:'2K'},
+{w:'attitude',d:'the way someone thinks or feels',e:'A positive attitude goes a long way.',dom:'business',b:'2K'},
+{w:'authority',d:'official power',e:'Only the lead has authority to sign.',dom:'business',b:'2K'},
+{w:'awareness',d:'knowing about something',e:'Mental health awareness is growing.',dom:'canadian',b:'2K'},
+{w:'background',d:'a person\'s past or origin',e:'My background is in environmental work.',dom:'business',b:'2K'},
+{w:'barrier',d:'something that blocks',e:'Language was my biggest barrier at first.',dom:'business',b:'2K'},
+{w:'bias',d:'unfair tendency toward something',e:'Hiring panels are trained to spot bias.',dom:'business',b:'2K'},
+{w:'bullet',d:'a small piece of metal fired from a gun',e:'The film had too much bullet violence.',dom:'daily',b:'2K'},
+{w:'campaign',d:'a planned series of actions',e:'A safety campaign starts next week.',dom:'business',b:'2K'},
+{w:'chairman',d:'the leader of a meeting or board',e:'The chairman opened the meeting at 10.',dom:'business',b:'2K'},
+{w:'chamber',d:'an enclosed room or space',e:'The freezer chamber stays at minus 20.',dom:'business',b:'2K'},
+{w:'chapter',d:'a section of a book; a stage',e:'A new chapter of my career starts here.',dom:'daily',b:'2K'},
+{w:'charity',d:'help given to those in need',e:'The Food Bank is a popular Canadian charity.',dom:'canadian',b:'2K'},
+{w:'climate',d:'the usual weather of an area',e:'Vancouver has a mild climate.',dom:'canadian',b:'2K'},
+{w:'closure',d:'the act of closing',e:'The road closure lasted three hours.',dom:'business',b:'2K'},
+{w:'collision',d:'a crash between two things',e:'The forklift collision damaged a rack.',dom:'business',b:'2K'},
+{w:'column',d:'a tall narrow shape; a vertical line',e:'Sort items into the green column.',dom:'business',b:'2K'},
+{w:'combination',d:'a mixing of things',e:'The combination of rain and ice is risky.',dom:'business',b:'2K'},
+{w:'commerce',d:'business in general',e:'E-commerce is changing retail.',dom:'business',b:'2K'},
+{w:'commission',d:'a percent of sales paid as wage',e:'Sales staff earn commission.',dom:'business',b:'2K'},
+{w:'commitment',d:'a promise or strong dedication',e:'He shows real commitment to safety.',dom:'business',b:'2K'},
+{w:'compromise',d:'an agreement where each gives up something',e:'We reached a fair compromise.',dom:'business',b:'2K'},
+{w:'confidence',d:'belief in yourself or someone',e:'I have confidence in my new team.',dom:'business',b:'2K'},
+{w:'conflict',d:'a serious disagreement',e:'Workplace conflict needs early action.',dom:'business',b:'2K'},
+{w:'conscience',d:'inner sense of right and wrong',e:'My conscience said to report it.',dom:'daily',b:'2K'},
+{w:'consent',d:'permission given',e:'I gave consent for the background check.',dom:'business',b:'2K'},
+{w:'conservation',d:'protecting nature or resources',e:'Water conservation is taught early in BC.',dom:'canadian',b:'2K'},
+{w:'consideration',d:'careful thought',e:'Take all options into consideration.',dom:'business',b:'2K'},
+{w:'conspiracy',d:'a secret harmful plan',e:'The fraud conspiracy was uncovered last year.',dom:'business',b:'2K'},
+{w:'constitution',d:'the basic rules of a country',e:'Canada\'s constitution protects French and English.',dom:'canadian',b:'2K'},
+{w:'construction',d:'the act of building',e:'Highway construction slows traffic.',dom:'canadian',b:'2K'},
+{w:'consultation',d:'a meeting to get advice',e:'A doctor consultation is covered by MSP.',dom:'canadian',b:'2K'},
+{w:'container',d:'an object that holds things',e:'Stack the empty containers by the wall.',dom:'business',b:'2K'},
+{w:'continent',d:'a large land mass',e:'Canada is in North America, the second-largest continent.',dom:'academic',b:'2K'},
+{w:'contest',d:'a competition',e:'Our team won the safety contest.',dom:'business',b:'2K'},
+{w:'creativity',d:'the skill of making new ideas',e:'Creativity helps when fixing odd problems.',dom:'business',b:'2K'},
+{w:'crisis',d:'a time of great difficulty',e:'The supply crisis hit small stores hard.',dom:'business',b:'2K'},
+{w:'critic',d:'a person who judges quality',e:'Movie critics gave it three stars.',dom:'daily',b:'2K'},
+{w:'crop',d:'plants grown for food',e:'BC blueberries are an important crop.',dom:'canadian',b:'2K'},
+{w:'currency',d:'the money of a country',e:'The currency is the Canadian dollar.',dom:'canadian',b:'2K'},
+{w:'custom',d:'a usual way of doing things',e:'It is custom to tip servers in Canada.',dom:'canadian',b:'2K'},
+{w:'cycle',d:'a repeated series of events',e:'The wash cycle takes 40 minutes.',dom:'daily',b:'2K'},
+{w:'dawn',d:'the early light of morning',e:'My shift starts before dawn in winter.',dom:'daily',b:'2K'},
+{w:'declaration',d:'a formal statement',e:'Sign the declaration of accuracy.',dom:'business',b:'2K'},
+
+// === Adjectives (50) ===
+{w:'global',d:'covering the whole world',e:'Climate change is a global issue.',dom:'academic',b:'2K'},
+{w:'hostile',d:'unfriendly or aggressive',e:'A hostile customer was asked to leave.',dom:'business',b:'2K'},
+{w:'humble',d:'not proud',e:'My humble guess is we will hit target.',dom:'daily',b:'2K'},
+{w:'ideal',d:'perfect for a purpose',e:'This is the ideal forklift route.',dom:'business',b:'2K'},
+{w:'identical',d:'exactly the same',e:'The two boxes are identical in size.',dom:'business',b:'2K'},
+{w:'immediate',d:'happening at once',e:'I need an immediate response from IT.',dom:'business',b:'2K'},
+{w:'imperative',d:'absolutely necessary',e:'It is imperative to log every spill.',dom:'business',b:'2K'},
+{w:'independent',d:'not controlled by others',e:'BC has an independent safety regulator.',dom:'canadian',b:'2K'},
+{w:'indispensable',d:'too important to do without',e:'Steel-toe boots are indispensable here.',dom:'business',b:'2K'},
+{w:'individual',d:'belonging to one person',e:'Each individual locker has a key.',dom:'business',b:'2K'},
+{w:'industrial',d:'related to factories',e:'This is an industrial zone.',dom:'business',b:'2K'},
+{w:'inevitable',d:'sure to happen',e:'Some delivery delays are inevitable in winter.',dom:'business',b:'2K'},
+{w:'inferior',d:'lower in quality',e:'The cheaper tape is inferior.',dom:'business',b:'2K'},
+{w:'inflexible',d:'unable to change',e:'The schedule is inflexible this month.',dom:'business',b:'2K'},
+{w:'informal',d:'casual, not official',e:'Friday huddles are informal.',dom:'business',b:'2K'},
+{w:'inherent',d:'existing as a natural part',e:'There is inherent risk in driving forklifts.',dom:'business',b:'2K'},
+{w:'initial',d:'first, at the beginning',e:'My initial training took two weeks.',dom:'business',b:'2K'},
+{w:'innovative',d:'introducing new ideas',e:'The new picking system is innovative.',dom:'business',b:'2K'},
+{w:'insignificant',d:'too small to matter',e:'A tiny dent is insignificant.',dom:'business',b:'2K'},
+{w:'intangible',d:'cannot be touched',e:'Trust is an intangible asset.',dom:'business',b:'2K'},
+{w:'intellectual',d:'relating to thinking',e:'The course is intellectual but practical.',dom:'academic',b:'2K'},
+{w:'intense',d:'very strong or extreme',e:'There is intense pressure during peak season.',dom:'business',b:'2K'},
+{w:'interactive',d:'involving two-way action',e:'The new training is interactive.',dom:'business',b:'2K'},
+{w:'interior',d:'inside something',e:'The interior of the truck was spotless.',dom:'business',b:'2K'},
+{w:'internal',d:'inside an organization',e:'This is an internal email — do not forward.',dom:'business',b:'2K'},
+{w:'intimate',d:'close and personal',e:'The team has an intimate working style.',dom:'daily',b:'2K'},
+{w:'intricate',d:'complex with many small parts',e:'The wiring is intricate but logical.',dom:'business',b:'2K'},
+{w:'intuitive',d:'easy to understand naturally',e:'The new app is intuitive to use.',dom:'business',b:'2K'},
+{w:'invisible',d:'cannot be seen',e:'The crack was invisible from outside.',dom:'business',b:'2K'},
+{w:'irrelevant',d:'not connected to the topic',e:'That comment is irrelevant to our issue.',dom:'business',b:'2K'},
+{w:'judicial',d:'related to courts and judges',e:'The judicial process can be slow.',dom:'academic',b:'2K'},
+{w:'liable',d:'legally responsible',e:'The company is liable for workplace injuries.',dom:'business',b:'2K'},
+{w:'liberal',d:'open to new ideas; generous',e:'They have a liberal vacation policy.',dom:'business',b:'2K'},
+{w:'limited',d:'restricted in amount',e:'Parking is limited near the dock.',dom:'business',b:'2K'},
+{w:'linguistic',d:'related to language',e:'Linguistic skills are valued in customer service.',dom:'academic',b:'2K'},
+{w:'loose',d:'not tight or fixed',e:'The strap is loose — please tighten it.',dom:'business',b:'2K'},
+{w:'loyal',d:'faithful and reliable',e:'Loyal staff get longer vacations.',dom:'business',b:'2K'},
+{w:'magnificent',d:'extremely impressive',e:'The view from the dock is magnificent.',dom:'daily',b:'2K'},
+{w:'mainstream',d:'shared by most people',e:'The mainstream view is to digitize records.',dom:'business',b:'2K'},
+{w:'malicious',d:'meaning to cause harm',e:'Spam emails are usually malicious.',dom:'business',b:'2K'},
+{w:'marginal',d:'small in amount',e:'The improvement was only marginal.',dom:'business',b:'2K'},
+{w:'masculine',d:'related to men',e:'The uniform sizing is too masculine for me.',dom:'daily',b:'2K'},
+{w:'massive',d:'very large',e:'A massive shipment came in this morning.',dom:'business',b:'2K'},
+{w:'maximum',d:'the largest possible',e:'The maximum load is 1500 kilos.',dom:'business',b:'2K'},
+{w:'mechanical',d:'related to machines',e:'My background is in mechanical work.',dom:'business',b:'2K'},
+{w:'medical',d:'related to medicine',e:'Bring medical clearance before lifting.',dom:'business',b:'2K'},
+{w:'mental',d:'related to the mind',e:'Mental rest matters as much as physical.',dom:'daily',b:'2K'},
+{w:'minimal',d:'very small in amount',e:'The damage was minimal.',dom:'business',b:'2K'},
+{w:'minor',d:'small or less important',e:'A minor scratch is not worth reporting.',dom:'business',b:'2K'},
+
+// === Adverbs / Connectors (15) ===
+{w:'partly',d:'in part',e:'I am partly responsible for the delay.',dom:'business',b:'2K'},
+{w:'particularly',d:'especially',e:'Be particularly careful on icy ramps.',dom:'business',b:'2K'},
+{w:'potentially',d:'possibly',e:'This delay potentially costs us a contract.',dom:'business',b:'2K'},
+{w:'presumably',d:'most likely',e:'Presumably the truck will arrive by 3.',dom:'business',b:'2K'},
+{w:'previously',d:'before now',e:'I previously worked in retail.',dom:'business',b:'2K'},
+{w:'primarily',d:'mainly',e:'I primarily handle returns.',dom:'business',b:'2K'},
+{w:'promptly',d:'quickly and on time',e:'Please reply promptly to safety alerts.',dom:'business',b:'2K'},
+{w:'rapidly',d:'very quickly',e:'Online orders are growing rapidly.',dom:'business',b:'2K'},
+{w:'readily',d:'easily and quickly',e:'Spare parts are readily available.',dom:'business',b:'2K'},
+{w:'relatively',d:'in comparison',e:'The job is relatively easy on day shift.',dom:'business',b:'2K'},
+{w:'reportedly',d:'according to reports',e:'The new manager is reportedly strict.',dom:'business',b:'2K'},
+{w:'respectively',d:'in the same order as listed',e:'Tom and Mai handle returns and intake respectively.',dom:'business',b:'2K'},
+{w:'severely',d:'very seriously',e:'Late arrivals are severely tracked.',dom:'business',b:'2K'},
+{w:'simply',d:'in a plain way',e:'Simply log in and click submit.',dom:'business',b:'2K'},
+
+// === Phrasal verbs (15) ===
+{w:'break up',d:'to end a relationship; to split',e:'They broke up the heavy load into two.',dom:'phrasal',b:'2K'},
+{w:'bring back',d:'to return; to revive',e:'Please bring back the dolly when done.',dom:'phrasal',b:'2K'},
+{w:'cheer up',d:'to feel happier',e:'A coffee usually cheers him up.',dom:'phrasal',b:'2K'},
+{w:'come up with',d:'to think of an idea',e:'She came up with a smart fix.',dom:'phrasal',b:'2K'},
+{w:'cut off',d:'to stop suddenly; to disconnect',e:'The power was cut off in the storm.',dom:'phrasal',b:'2K'},
+{w:'drop off',d:'to leave; to decrease',e:'I drop off my child at daycare at 8.',dom:'phrasal',b:'2K'},
+{w:'end up',d:'to finally be in a state',e:'I ended up working overtime.',dom:'phrasal',b:'2K'},
+{w:'figure out',d:'to solve or understand',e:'I will figure out the new system.',dom:'phrasal',b:'2K'},
+{w:'get off',d:'to leave a vehicle; to finish work',e:'I get off work at 5pm.',dom:'phrasal',b:'2K'},
+{w:'hand in',d:'to submit',e:'Hand in your timesheet by Friday.',dom:'phrasal',b:'2K'},
+{w:'hold on',d:'to wait; to grip something',e:'Hold on to the rail going down stairs.',dom:'phrasal',b:'2K'},
+{w:'keep up',d:'to continue at the same pace',e:'It is hard to keep up during peak.',dom:'phrasal',b:'2K'},
+{w:'let down',d:'to disappoint',e:'I do not want to let my team down.',dom:'phrasal',b:'2K'},
+{w:'make up',d:'to invent; to reconcile',e:'They quickly made up after the argument.',dom:'phrasal',b:'2K'},
+
+// === 13 fresh replacements for the deduped overlaps ===
+{w:'restrict',d:'to limit something',e:'Forklift use is restricted to certified staff.',dom:'business',b:'2K'},
+{w:'retain',d:'to keep or hold onto',e:'Retain a copy of every receipt.',dom:'business',b:'2K'},
+{w:'reveal',d:'to show what was hidden',e:'The audit revealed two missing units.',dom:'business',b:'2K'},
+{w:'reward',d:'something given for good work',e:'Perfect attendance earned her a reward.',dom:'business',b:'2K'},
+{w:'routine',d:'a usual order of doing things',e:'My morning routine starts at 5am.',dom:'daily',b:'2K'},
+{w:'tactic',d:'a way to achieve something',e:'A common tactic is to negotiate softly.',dom:'business',b:'2K'},
+{w:'trigger',d:'to cause something to happen',e:'Loud noises trigger her stress.',dom:'business',b:'2K'},
+{w:'unique',d:'one of a kind',e:'Each SKU has a unique barcode.',dom:'business',b:'2K'},
+{w:'urgent',d:'needing immediate action',e:'Mark the email urgent if it cannot wait.',dom:'business',b:'2K'},
+{w:'virtue',d:'a good moral quality',e:'Patience is a virtue with new hires.',dom:'daily',b:'2K'},
+{w:'wisdom',d:'good judgement from experience',e:'There is wisdom in the older crew.',dom:'daily',b:'2K'},
+{w:'workshop',d:'a hands-on training session',e:'A safety workshop runs Friday afternoon.',dom:'business',b:'2K'},
+
+// ===== Batch 3 (added 2026-04-27) — another 200 NGSL 2K-range words =====
+
+// === Verbs (50) ===
+{w:'elect',d:'to choose by voting',e:'Members elect a new safety rep yearly.',dom:'business',b:'2K'},
+{w:'eliminate',d:'to remove completely',e:'We eliminated unnecessary paperwork.',dom:'business',b:'2K'},
+{w:'emerge',d:'to come out or become known',e:'A pattern emerged from the data.',dom:'business',b:'2K'},
+{w:'employ',d:'to hire; to use',e:'They employ 200 people in BC.',dom:'business',b:'2K'},
+{w:'encounter',d:'to meet unexpectedly',e:'I encountered a tough problem.',dom:'business',b:'2K'},
+{w:'encourage',d:'to give support and confidence',e:'My boss encourages questions.',dom:'business',b:'2K'},
+{w:'engage',d:'to take part in something',e:'Engage the brake before stepping out.',dom:'business',b:'2K'},
+{w:'enroll',d:'to officially sign up',e:'Enroll in benefits within 90 days.',dom:'canadian',b:'2K'},
+{w:'equip',d:'to provide with tools or skills',e:'New hires are equipped with vests on day one.',dom:'business',b:'2K'},
+{w:'escape',d:'to get away from danger',e:'Know the closest fire escape route.',dom:'business',b:'2K'},
+{w:'govern',d:'to officially rule or control',e:'Strict rules govern workplace lifting.',dom:'business',b:'2K'},
+{w:'grasp',d:'to hold firmly; to understand',e:'I quickly grasped the new system.',dom:'business',b:'2K'},
+{w:'generate',d:'to produce or create',e:'The new line generates more revenue.',dom:'business',b:'2K'},
+{w:'harvest',d:'to gather a crop',e:'Blueberry harvest peaks in July.',dom:'canadian',b:'2K'},
+{w:'hesitate',d:'to pause before doing',e:'Do not hesitate to call for help.',dom:'business',b:'2K'},
+{w:'imitate',d:'to copy what someone does',e:'New staff often imitate their lead.',dom:'business',b:'2K'},
+{w:'impose',d:'to force a rule or burden',e:'A fine was imposed for the violation.',dom:'business',b:'2K'},
+{w:'incorporate',d:'to include or add in',e:'Incorporate the new rule into training.',dom:'business',b:'2K'},
+{w:'induce',d:'to cause something to happen',e:'Bright lights induce headaches for some.',dom:'business',b:'2K'},
+{w:'inform',d:'to tell officially',e:'Please inform HR of any address change.',dom:'business',b:'2K'},
+{w:'inherit',d:'to receive from a predecessor',e:'I inherited a messy storage room.',dom:'business',b:'2K'},
+{w:'inhibit',d:'to slow or prevent',e:'Loud noise inhibits clear communication.',dom:'business',b:'2K'},
+{w:'inject',d:'to push fluid into; to introduce',e:'The flu shot is injected in the arm.',dom:'daily',b:'2K'},
+{w:'insist',d:'to demand firmly',e:'I insist on safe lifting form.',dom:'business',b:'2K'},
+{w:'inspire',d:'to fill with energy or ideas',e:'Her promotion inspired the whole team.',dom:'business',b:'2K'},
+{w:'install',d:'to put in place for use',e:'IT will install the new scanner Monday.',dom:'business',b:'2K'},
+{w:'integrate',d:'to combine into a whole',e:'We integrate Mexican stock with Canadian.',dom:'business',b:'2K'},
+{w:'interpret',d:'to explain the meaning of',e:'How do you interpret this clause?',dom:'academic',b:'2K'},
+{w:'interrupt',d:'to break the flow of',e:'Sorry to interrupt your call.',dom:'business',b:'2K'},
+{w:'invade',d:'to enter forcefully',e:'Mice can invade dry-storage areas.',dom:'business',b:'2K'},
+{w:'invent',d:'to create something new',e:'The team invented a faster sort method.',dom:'business',b:'2K'},
+{w:'invest',d:'to put money or effort into',e:'The company invests in training.',dom:'business',b:'2K'},
+{w:'investigate',d:'to look into carefully',e:'HR will investigate the complaint.',dom:'business',b:'2K'},
+{w:'invoke',d:'to call on something for support',e:'He invoked the safety policy to refuse the task.',dom:'business',b:'2K'},
+{w:'isolate',d:'to separate from others',e:'Isolate the broken pallet for review.',dom:'business',b:'2K'},
+{w:'judge',d:'to form an opinion',e:'Do not judge the day by 7am.',dom:'daily',b:'2K'},
+{w:'launch',d:'to start or release',e:'We launch the new app next quarter.',dom:'business',b:'2K'},
+{w:'license',d:'to give official permission',e:'You must be licensed to drive the boom lift.',dom:'business',b:'2K'},
+{w:'locate',d:'to find the place of',e:'Locate the spill kit in aisle 4.',dom:'business',b:'2K'},
+{w:'maintain',d:'to keep in good condition',e:'Maintain a clean workstation at all times.',dom:'business',b:'2K'},
+{w:'manipulate',d:'to handle skillfully; to control unfairly',e:'Do not let anyone manipulate the timesheet.',dom:'business',b:'2K'},
+{w:'manufacture',d:'to make products in large numbers',e:'They manufacture lawn mowers in Surrey.',dom:'canadian',b:'2K'},
+{w:'merge',d:'to combine into one',e:'The two teams merged last month.',dom:'business',b:'2K'},
+{w:'migrate',d:'to move to a new place',e:'Geese migrate south for winter.',dom:'canadian',b:'2K'},
+{w:'modify',d:'to change slightly',e:'I modified the layout for safety.',dom:'business',b:'2K'},
+{w:'motivate',d:'to give a reason to act',e:'Recognition motivates the team.',dom:'business',b:'2K'},
+{w:'nominate',d:'to formally suggest someone',e:'I nominated her for employee of the month.',dom:'business',b:'2K'},
+
+// === Nouns (70) ===
+{w:'department',d:'a section of an organization',e:'I transferred to the shipping department.',dom:'business',b:'2K'},
+{w:'departure',d:'the act of leaving',e:'Departure for the airport is at 5am.',dom:'daily',b:'2K'},
+{w:'description',d:'a written or spoken account',e:'Read the job description carefully.',dom:'business',b:'2K'},
+{w:'determination',d:'firmness of purpose',e:'Her determination got her the promotion.',dom:'business',b:'2K'},
+{w:'development',d:'the process of growing',e:'Career development matters at every level.',dom:'business',b:'2K'},
+{w:'device',d:'a tool or machine',e:'The scanning device beeps when accepted.',dom:'business',b:'2K'},
+{w:'dialogue',d:'a conversation between people',e:'We need open dialogue between shifts.',dom:'business',b:'2K'},
+{w:'director',d:'a person who leads',e:'The director visits twice a year.',dom:'business',b:'2K'},
+{w:'discipline',d:'self-control; a field of study',e:'Punctuality requires discipline.',dom:'business',b:'2K'},
+{w:'discount',d:'a reduced price',e:'Staff get a 15% discount on store items.',dom:'business',b:'2K'},
+{w:'discovery',d:'finding something new',e:'The discovery of the leak saved us money.',dom:'business',b:'2K'},
+{w:'discussion',d:'a serious conversation',e:'Let us have a quick discussion about hours.',dom:'business',b:'2K'},
+{w:'domain',d:'an area of activity',e:'Safety is the union\'s main domain.',dom:'business',b:'2K'},
+{w:'economy',d:'a country\'s money system',e:'BC\'s economy depends on natural resources.',dom:'canadian',b:'2K'},
+{w:'edition',d:'a version of a publication',e:'Read the latest edition of the manual.',dom:'business',b:'2K'},
+{w:'emergency',d:'a sudden serious situation',e:'In an emergency, dial 911.',dom:'canadian',b:'2K'},
+{w:'employment',d:'paid work',e:'My employment started in March.',dom:'business',b:'2K'},
+{w:'enterprise',d:'a large business or project',e:'The new enterprise hires bilingual staff.',dom:'business',b:'2K'},
+{w:'entertainment',d:'fun activities',e:'Movies are my main entertainment.',dom:'daily',b:'2K'},
+{w:'enthusiasm',d:'eager interest',e:'She brings enthusiasm to every shift.',dom:'business',b:'2K'},
+{w:'entity',d:'a separate thing or being',e:'A company is a legal entity.',dom:'business',b:'2K'},
+{w:'equipment',d:'tools needed for a task',e:'Lifting equipment is checked weekly.',dom:'business',b:'2K'},
+{w:'essay',d:'a short piece of writing',e:'I wrote an essay for my course.',dom:'academic',b:'2K'},
+{w:'evolution',d:'gradual development over time',e:'The evolution of e-commerce changed retail.',dom:'business',b:'2K'},
+{w:'exception',d:'something that does not follow the rule',e:'Holidays are an exception to normal hours.',dom:'business',b:'2K'},
+{w:'exchange',d:'trading one thing for another',e:'The exchange rate is posted at the till.',dom:'business',b:'2K'},
+{w:'exhibition',d:'a public display',e:'The trade exhibition runs three days.',dom:'business',b:'2K'},
+{w:'expansion',d:'growing larger',e:'The expansion adds two more docks.',dom:'business',b:'2K'},
+{w:'experiment',d:'a scientific test',e:'The lab ran an experiment on packing.',dom:'academic',b:'2K'},
+{w:'expertise',d:'special skill or knowledge',e:'Her expertise in safety is unmatched.',dom:'business',b:'2K'},
+{w:'exploration',d:'studying or searching carefully',e:'Cost exploration begins this quarter.',dom:'business',b:'2K'},
+{w:'expression',d:'showing thoughts or feelings',e:'A friendly expression helps with customers.',dom:'daily',b:'2K'},
+{w:'extension',d:'an added part; extra time',e:'I asked for an extension on the deadline.',dom:'business',b:'2K'},
+{w:'faculty',d:'a teaching staff; an ability',e:'University faculty often have PhDs.',dom:'academic',b:'2K'},
+{w:'fame',d:'being widely known',e:'IKEA built fame on flat-pack design.',dom:'business',b:'2K'},
+{w:'festival',d:'a celebration event',e:'The Lantern Festival is in Burnaby.',dom:'canadian',b:'2K'},
+{w:'flavor',d:'how something tastes',e:'Tim Hortons offers seasonal flavors.',dom:'canadian',b:'2K'},
+{w:'format',d:'the layout or form',e:'Submit the report in PDF format.',dom:'business',b:'2K'},
+{w:'formula',d:'a fixed rule or recipe',e:'There is no magic formula for promotion.',dom:'business',b:'2K'},
+{w:'fortune',d:'wealth or luck',e:'It is bad fortune to lose your badge.',dom:'daily',b:'2K'},
+{w:'foundation',d:'the base; an organization',e:'Trust is the foundation of teamwork.',dom:'business',b:'2K'},
+{w:'fragment',d:'a small broken piece',e:'A fragment of glass was on the floor.',dom:'business',b:'2K'},
+{w:'frequency',d:'how often something happens',e:'The frequency of audits has doubled.',dom:'business',b:'2K'},
+{w:'friction',d:'rubbing or conflict',e:'There is some friction between teams.',dom:'business',b:'2K'},
+{w:'function',d:'the purpose of something',e:'The main function of the safety belt is clear.',dom:'business',b:'2K'},
+{w:'furniture',d:'tables, chairs, etc.',e:'IKEA furniture is sold flat-packed.',dom:'canadian',b:'2K'},
+{w:'gallery',d:'a place for showing art',e:'A small gallery is across the street.',dom:'daily',b:'2K'},
+{w:'gap',d:'a space or missing piece',e:'There is a gap between expectation and reality.',dom:'business',b:'2K'},
+{w:'gathering',d:'a group of people',e:'The Friday gathering is informal.',dom:'business',b:'2K'},
+{w:'generation',d:'people of about the same age',e:'My parents\' generation grew up without smartphones.',dom:'daily',b:'2K'},
+{w:'genre',d:'a category of art or media',e:'I prefer the documentary genre.',dom:'daily',b:'2K'},
+{w:'gesture',d:'a movement showing a feeling',e:'A small gesture of thanks goes far.',dom:'daily',b:'2K'},
+{w:'governance',d:'the way an organization is run',e:'Workplace governance is improving.',dom:'business',b:'2K'},
+{w:'glance',d:'a quick look',e:'A glance at the chart tells you the schedule.',dom:'daily',b:'2K'},
+{w:'glimpse',d:'a brief partial look',e:'I caught a glimpse of the new manager.',dom:'daily',b:'2K'},
+{w:'gradient',d:'a slope or rate of change',e:'The truck handles a steep gradient well.',dom:'academic',b:'2K'},
+{w:'grievance',d:'a formal complaint',e:'File a grievance through your union rep.',dom:'business',b:'2K'},
+{w:'guarantee',d:'a formal promise',e:'I cannot guarantee the time, but I will try.',dom:'business',b:'2K'},
+{w:'guideline',d:'a recommended rule',e:'Follow the lifting guideline at all times.',dom:'business',b:'2K'},
+{w:'habitat',d:'a natural place an animal lives',e:'Salmon habitat is protected in BC rivers.',dom:'canadian',b:'2K'},
+{w:'handful',d:'a small amount',e:'Only a handful of staff stayed late.',dom:'daily',b:'2K'},
+{w:'harmony',d:'agreement or pleasing combination',e:'There is harmony between day and night shifts.',dom:'business',b:'2K'},
+{w:'heritage',d:'history and culture passed down',e:'Indigenous heritage is taught in BC schools.',dom:'canadian',b:'2K'},
+{w:'hierarchy',d:'an order of rank',e:'The store has a clear hierarchy.',dom:'business',b:'2K'},
+
+// === Adjectives (50) ===
+{w:'naval',d:'related to a navy',e:'Esquimalt has a large naval base.',dom:'canadian',b:'2K'},
+{w:'neutral',d:'not taking sides',e:'A mediator must stay neutral.',dom:'business',b:'2K'},
+{w:'nominal',d:'small or in name only',e:'There is a nominal fee for replacement IDs.',dom:'business',b:'2K'},
+{w:'notorious',d:'famous for something bad',e:'The corner is notorious for forklift bumps.',dom:'business',b:'2K'},
+{w:'numerous',d:'many in number',e:'Numerous safety bulletins are posted.',dom:'business',b:'2K'},
+{w:'ongoing',d:'still continuing',e:'Training is an ongoing process.',dom:'business',b:'2K'},
+{w:'optical',d:'related to sight',e:'The optical sensor detects passing pallets.',dom:'business',b:'2K'},
+{w:'optimal',d:'best for the purpose',e:'The optimal lift height is waist level.',dom:'business',b:'2K'},
+{w:'optimistic',d:'expecting good results',e:'I am optimistic about hitting target.',dom:'business',b:'2K'},
+{w:'oral',d:'spoken; related to the mouth',e:'The interview includes an oral test.',dom:'business',b:'2K'},
+{w:'ordinary',d:'usual or common',e:'It was an ordinary Tuesday at work.',dom:'daily',b:'2K'},
+{w:'organic',d:'natural; without chemicals',e:'Organic products are popular in BC.',dom:'canadian',b:'2K'},
+{w:'orthodox',d:'following accepted rules',e:'The orthodox method is faster.',dom:'academic',b:'2K'},
+{w:'outdoor',d:'in the open air',e:'Outdoor work pays more in winter.',dom:'business',b:'2K'},
+{w:'outstanding',d:'excellent; not yet paid',e:'She did outstanding work this month.',dom:'business',b:'2K'},
+{w:'overall',d:'in total; considering everything',e:'Overall performance is solid.',dom:'business',b:'2K'},
+{w:'overt',d:'open and clear',e:'There was no overt complaint, just hints.',dom:'business',b:'2K'},
+{w:'overwhelming',d:'too much to handle',e:'Day one was overwhelming.',dom:'business',b:'2K'},
+{w:'parallel',d:'running side by side',e:'The two conveyors run parallel.',dom:'business',b:'2K'},
+{w:'peculiar',d:'odd or unusual',e:'There was a peculiar smell in the freezer.',dom:'business',b:'2K'},
+{w:'peripheral',d:'on the edge; less important',e:'Peripheral tasks can wait.',dom:'business',b:'2K'},
+{w:'persistent',d:'continuing despite difficulty',e:'A persistent rattle means something is loose.',dom:'business',b:'2K'},
+{w:'persuasive',d:'good at convincing',e:'She made a persuasive argument for new gear.',dom:'business',b:'2K'},
+{w:'plentiful',d:'available in large amounts',e:'Coffee is plentiful in the break room.',dom:'daily',b:'2K'},
+{w:'potent',d:'very strong in effect',e:'A potent cleaner removes oil stains.',dom:'business',b:'2K'},
+{w:'predictable',d:'easy to know in advance',e:'Tuesday volume is fairly predictable.',dom:'business',b:'2K'},
+{w:'preferable',d:'better than another option',e:'Email is preferable to a phone call here.',dom:'business',b:'2K'},
+{w:'preliminary',d:'happening before the main event',e:'A preliminary review took two hours.',dom:'business',b:'2K'},
+{w:'premium',d:'high quality; extra cost',e:'Premium parking is reserved for visitors.',dom:'business',b:'2K'},
+{w:'previous',d:'happening before',e:'My previous job was in retail.',dom:'business',b:'2K'},
+{w:'primary',d:'main; first in importance',e:'Safety is our primary concern.',dom:'business',b:'2K'},
+{w:'prime',d:'best; main',e:'5pm is the prime time for accidents.',dom:'business',b:'2K'},
+{w:'principal',d:'most important',e:'The principal cause was poor lighting.',dom:'business',b:'2K'},
+{w:'prior',d:'earlier; before',e:'Submit the form prior to your shift.',dom:'business',b:'2K'},
+{w:'probable',d:'likely to happen',e:'Rain is probable this afternoon.',dom:'daily',b:'2K'},
+{w:'productive',d:'making good results',e:'The morning meeting was productive.',dom:'business',b:'2K'},
+{w:'professional',d:'related to skilled work',e:'A professional attitude opens doors.',dom:'business',b:'2K'},
+{w:'proficient',d:'skilled at doing something',e:'I am proficient with Excel basics.',dom:'business',b:'2K'},
+{w:'progressive',d:'happening gradually; favoring change',e:'The progressive policy lets parents flex hours.',dom:'business',b:'2K'},
+{w:'prolific',d:'producing a lot',e:'She is a prolific suggestion-box contributor.',dom:'business',b:'2K'},
+{w:'prominent',d:'easily noticed; well-known',e:'Place the prominent signs at the entrance.',dom:'business',b:'2K'},
+{w:'prone',d:'likely to do or suffer',e:'Wet floors are prone to slips.',dom:'business',b:'2K'},
+{w:'proportional',d:'matching in size or amount',e:'Effort and outcome are usually proportional.',dom:'academic',b:'2K'},
+{w:'prospective',d:'expected in the future',e:'Prospective hires must pass a check.',dom:'business',b:'2K'},
+{w:'protected',d:'kept safe',e:'Pension funds are legally protected.',dom:'business',b:'2K'},
+{w:'prudent',d:'careful and wise',e:'It is prudent to keep extra batteries.',dom:'business',b:'2K'},
+{w:'punctual',d:'on time',e:'Be punctual for every shift.',dom:'business',b:'2K'},
+{w:'qualified',d:'having the right skills or papers',e:'Only qualified drivers handle the boom lift.',dom:'business',b:'2K'},
+
+// === Adverbs / Connectors (15) ===
+{w:'accordingly',d:'in a way that fits',e:'Plan your day accordingly.',dom:'business',b:'2K'},
+{w:'apparently',d:'as it seems',e:'Apparently the truck broke down.',dom:'business',b:'2K'},
+{w:'consequently',d:'as a result',e:'It rained; consequently, traffic was slow.',dom:'business',b:'2K'},
+{w:'essentially',d:'basically; in core',e:'Essentially, the new app is the same.',dom:'business',b:'2K'},
+{w:'furthermore',d:'in addition',e:'Furthermore, all training is paid.',dom:'business',b:'2K'},
+{w:'likewise',d:'in the same way',e:'Pickers wear hi-vis; supervisors likewise.',dom:'business',b:'2K'},
+{w:'moreover',d:'in addition; besides',e:'Moreover, the bonus is paid quarterly.',dom:'business',b:'2K'},
+{w:'namely',d:'specifically; that is',e:'One area needs work, namely punctuality.',dom:'business',b:'2K'},
+{w:'nevertheless',d:'despite that',e:'It rained; nevertheless, we finished on time.',dom:'business',b:'2K'},
+{w:'nonetheless',d:'still; even so',e:'The job is hard; nonetheless, I enjoy it.',dom:'business',b:'2K'},
+{w:'notwithstanding',d:'despite something',e:'Notwithstanding the delay, the order shipped.',dom:'business',b:'2K'},
+{w:'otherwise',d:'in another way; if not',e:'Sign in; otherwise, the gate stays locked.',dom:'business',b:'2K'},
+{w:'precisely',d:'exactly',e:'The shift starts at precisely 6am.',dom:'business',b:'2K'},
+{w:'publicly',d:'in a way visible to all',e:'The award was given publicly.',dom:'business',b:'2K'},
+{w:'specifically',d:'in a particular way',e:'I am specifically trained on cold-chain.',dom:'business',b:'2K'},
+
+// === Phrasal verbs (15) ===
+{w:'catch up',d:'to reach the same level; to chat',e:'I need to catch up on the emails.',dom:'phrasal',b:'2K'},
+{w:'drop in',d:'to visit briefly',e:'Drop in if you have a question.',dom:'phrasal',b:'2K'},
+{w:'get back',d:'to return',e:'I will get back to you by 3pm.',dom:'phrasal',b:'2K'},
+{w:'get over',d:'to recover from',e:'It took a week to get over the cold.',dom:'phrasal',b:'2K'},
+{w:'look forward to',d:'to feel happy about something coming',e:'I look forward to the Friday meeting.',dom:'phrasal',b:'2K'},
+{w:'put up with',d:'to tolerate',e:'I put up with the long commute.',dom:'phrasal',b:'2K'},
+{w:'shut down',d:'to stop operations',e:'The line shut down for cleaning.',dom:'phrasal',b:'2K'},
+{w:'show up',d:'to arrive; to appear',e:'Show up ten minutes before your shift.',dom:'phrasal',b:'2K'},
+{w:'stick to',d:'to continue with',e:'Stick to the plan during peak hours.',dom:'phrasal',b:'2K'},
+{w:'throw away',d:'to discard',e:'Do not throw away reusable totes.',dom:'phrasal',b:'2K'},
+{w:'turn down',d:'to reject; to lower',e:'Please turn down the radio volume.',dom:'phrasal',b:'2K'},
+
+// === 16 fresh replacements for the deduped overlaps ===
+{w:'foster',d:'to encourage growth',e:'Good leaders foster trust on a team.',dom:'business',b:'2K'},
+{w:'preserve',d:'to keep something safe from loss',e:'Preserve the receipt for the audit.',dom:'business',b:'2K'},
+{w:'pursue',d:'to chase or seek',e:'I pursue every safety lead seriously.',dom:'business',b:'2K'},
+{w:'ambassador',d:'an official representative',e:'She acts as an ambassador for our team.',dom:'business',b:'2K'},
+{w:'backbone',d:'the main support',e:'The crew is the backbone of the warehouse.',dom:'business',b:'2K'},
+{w:'catalogue',d:'a list of items for sale',e:'Check the parts catalogue for the SKU.',dom:'business',b:'2K'},
+{w:'citation',d:'a formal reference; a fine',e:'My report cited two safety citations.',dom:'business',b:'2K'},
+{w:'complement',d:'something that completes another',e:'Strong tools are a complement to good training.',dom:'business',b:'2K'},
+{w:'consensus',d:'general agreement',e:'There was consensus on the new break schedule.',dom:'business',b:'2K'},
+{w:'corridor',d:'a long narrow passage',e:'Keep the main corridor clear at all times.',dom:'business',b:'2K'},
+{w:'pivotal',d:'extremely important',e:'The training session is pivotal for new staff.',dom:'business',b:'2K'},
+{w:'pragmatic',d:'practical, focused on results',e:'Take a pragmatic approach to the deadline.',dom:'business',b:'2K'},
+{w:'punitive',d:'meant as punishment',e:'The fine was punitive, not preventive.',dom:'business',b:'2K'},
+{w:'pull off',d:'to succeed at something difficult',e:'We pulled off the audit with no findings.',dom:'phrasal',b:'2K'},
+{w:'run into',d:'to meet by chance; to hit',e:'I ran into my old supervisor downtown.',dom:'phrasal',b:'2K'},
+{w:'stand by',d:'to wait ready; to support',e:'Please stand by while I check the system.',dom:'phrasal',b:'2K'},
+];
+
 function inferStatusFromVmap(domain, band){
   // Returns 'mastered'|'familiar'|'learning'|'beginner'|'new' based on last test's cell or band score.
   if(!state.vmapHistory || state.vmapHistory.length === 0) return 'new';
@@ -8739,6 +10212,7 @@ let bulkImport = null; // {step, wordList, plan, spotCheckIdx, spotCheckResults}
 function startBulkImport(listKey){
   const lists = {
     'ngsl-1k': {data:VMAP_NGSL_1K, label:'NGSL 1K (most common 1000 words)'},
+    'ngsl-2k': {data:VMAP_NGSL_2K, label:'NGSL 2K (high-value second-tier words)'},
   };
   const chosen = lists[listKey];
   if(!chosen || chosen.data.length === 0){

@@ -1,5 +1,11 @@
 # Canadian English Vocabulary Trainer
 
+> **Status (2026-04-29): ARCHIVED — superseded by Langua.**
+> Daily learning happens in Langua. This repo is preserved as a one-shot tool:
+> use the **Vocab Map** test (Home screen) for frequency × domain gap detection,
+> and the bulk-import NGSL libraries for one-time vocabulary baselines.
+> No further development planned. All features below remain functional.
+
 Main app: `vocab-trainer.html` (~7143 lines). PWA manifest & icons generated inline. Hosted on GitHub Pages.
 
 ## Files
